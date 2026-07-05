@@ -1,0 +1,61 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Local databases and runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.session
+*.log
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Dependencies
+node_modules/
+
+# Package manager caches
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Build and coverage output
+dist/
+build/
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Cloudflare / Wrangler local state
+.wrangler/
+.dev.vars
+.mf/
+.miniflare/
+
+# Project-local tools and credentials
+.tools/
+.local/
+
+# TypeScript / JavaScript caches
+.tsbuildinfo
+*.tsbuildinfo
+.vite/
+
+# Temporary files
+tmp/
+temp/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
