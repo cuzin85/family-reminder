@@ -107,6 +107,8 @@ If the bot does not respond:
 4. Check bot Worker logs.
 5. Send `/start` again.
 
+If `wrangler tail` shows successful `POST /telegram/webhook` requests but the bot stays silent, the most common cause is a secret mismatch: the `secret_token` used in `setWebhook` must be exactly the same value as the bot Worker's `TELEGRAM_WEBHOOK_SECRET`.
+
 ## Reminders
 
 Reminders are processed by the bot Worker's Cron Trigger.
@@ -222,6 +224,15 @@ Required production secrets:
 - `ALLOWED_TELEGRAM_USER_IDS`;
 - `WEB_SESSION_SECRET`.
 
+The bot Worker and the web Worker are separate Cloudflare Workers, so configure secrets for the Worker that needs them. In a split deployment:
+
+- the bot Worker needs `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `ALLOWED_TELEGRAM_USER_IDS`;
+- the web Worker needs `TELEGRAM_BOT_TOKEN`, `ALLOWED_TELEGRAM_USER_IDS`, and `WEB_SESSION_SECRET`.
+
+`WEB_SESSION_SECRET` must be a non-empty random value. An empty value can break Telegram Login session signing with an HMAC key length error.
+
+The web Worker's `TELEGRAM_BOT_TOKEN` must belong to the same Telegram bot whose domain is configured in BotFather.
+
 Optional development secret:
 
 - `WEB_DEV_AUTH_TOKEN`.
@@ -265,6 +276,17 @@ If you changed only web UI or web API, deploy only the web Worker.
 
 If you changed Telegram webhook, reminder processing, Cron behavior, or shared runtime code used by the bot Worker, deploy the bot Worker.
 
+## Wrangler Authentication
+
+`npx wrangler login` opens a browser flow that redirects to `localhost`. This works well on a local computer, but may fail in remote development environments such as Codespaces or SSH-only servers because the callback URL points to the remote machine, not your browser.
+
+If browser login does not complete in a remote environment, use one of these approaches:
+
+1. Run Wrangler deploy/setup commands from your local computer where browser login works.
+2. Use a Cloudflare API token through `CLOUDFLARE_API_TOKEN`.
+
+Do not commit Cloudflare API tokens.
+
 ## D1 Migrations
 
 Production migrations are remote operations. Review migrations before applying them.
@@ -282,6 +304,16 @@ npm run d1:migrations:web-dev:remote
 ```
 
 The production bot Worker and production web Worker should point to the same D1 database. A production migration usually needs to be applied only once to that shared database.
+
+The D1 binding name in `wrangler.jsonc` must remain `DB`, because the Worker code expects `env.DB`.
+
+If Wrangler offers to add a newly created D1 database to `wrangler.jsonc` automatically, either decline and paste the values manually, or accept and then review the file. Make sure each Worker environment has only one `DB` binding.
+
+If you use a custom D1 database name, apply migrations with that database name:
+
+```bash
+npx wrangler d1 migrations apply <your-database-name> --remote
+```
 
 Before risky migrations:
 

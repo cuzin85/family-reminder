@@ -23,14 +23,10 @@
     "d1:test:recurring:cleanup:local": "wrangler d1 execute family-reminder-db --local --file=./test-data/recurring_cleanup.sql",
     "d1:test:monthly-daily:seed:local": "wrangler d1 execute family-reminder-db --local --file=./test-data/monthly_daily_seed.sql",
     "d1:test:monthly-daily:inspect:local": "wrangler d1 execute family-reminder-db --local --file=./test-data/monthly_daily_inspect.sql",
-    "d1:test:monthly-daily:cleanup:local": "wrangler d1 execute family-reminder-db --local --file=./test-data/monthly_daily_cleanup.sql",
-    "web:check-ui": "playwright test web-tests/visual-smoke.spec.ts",
-    "web:screenshots": "playwright test web-tests/visual-screenshots.spec.ts",
-    "web:check-ui:report": "playwright show-report ./tmp/playwright-report"
+    "d1:test:monthly-daily:cleanup:local": "wrangler d1 execute family-reminder-db --local --file=./test-data/monthly_daily_cleanup.sql"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0",
-    "@playwright/test": "^1.57.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",

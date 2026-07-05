@@ -40,7 +40,6 @@ The interface supports Russian and English through the `APP_LOCALE` setting.
 - Telegram Login Widget
 - React
 - Vite
-- Optional Playwright visual smoke checks
 
 Long polling is not used.
 
@@ -52,7 +51,6 @@ src/web/             Web API handlers
 web/                 React frontend
 migrations/          Cloudflare D1 migrations
 test-data/           Local D1 test data
-web-tests/           Optional Playwright visual smoke checks
 wrangler.jsonc       Cloudflare Workers configuration template
 .env.example         Safe environment variable template
 ```
@@ -66,9 +64,6 @@ Additional documentation:
 - [RUNBOOK.md](./RUNBOOK.md)
 - [SECURITY.md](./SECURITY.md)
 - [PRIVACY.md](./PRIVACY.md)
-- [PUBLIC_RELEASE.md](./PUBLIC_RELEASE.md)
-
-Some documentation files may still be under public-release cleanup.
 
 ## Requirements
 
@@ -129,6 +124,10 @@ Copy the returned `database_id` into both production D1 bindings in `wrangler.js
 - top-level `d1_databases`
 - `env.web.d1_databases`
 
+Keep the binding name as `DB`. The Worker code expects `env.DB`.
+
+If Wrangler asks whether it should update `wrangler.jsonc` automatically, you can choose `No` and paste the returned `database_id` manually. If you choose `Yes`, review the generated config and make sure there is only one `DB` binding per Worker environment.
+
 Optional: create a separate dev database for `web-dev`:
 
 ```bash
@@ -141,6 +140,12 @@ Apply production migrations:
 
 ```bash
 npm run d1:migrations:remote
+```
+
+The migration script above uses the default database name `family-reminder-db`. If you choose a different database name, apply migrations with:
+
+```bash
+npx wrangler d1 migrations apply <your-database-name> --remote
 ```
 
 If you use the `web-dev` environment:
@@ -187,6 +192,8 @@ Generate random secrets with a password manager or with a command such as:
 openssl rand -hex 32
 ```
 
+`WEB_SESSION_SECRET` must not be empty. If it is empty, Telegram Login can fail with an HMAC key error.
+
 Set bot Worker secrets:
 
 ```bash
@@ -204,6 +211,8 @@ npx wrangler secret put TELEGRAM_WEBHOOK_SECRET --env web
 npx wrangler secret put ALLOWED_TELEGRAM_USER_IDS --env web
 npx wrangler secret put WEB_SESSION_SECRET --env web
 ```
+
+The bot Worker and the web Worker both need the required secrets. In particular, `TELEGRAM_BOT_TOKEN` in the web Worker must belong to the same Telegram bot configured in BotFather for Telegram Login.
 
 `ALLOWED_TELEGRAM_USER_IDS` is a comma-separated bootstrap admin list:
 
@@ -299,30 +308,6 @@ Remote D1 migrations:
 
 ```bash
 npm run d1:migrations:remote
-```
-
-## Visual Smoke Checks
-
-Playwright checks are available for development-time web UI validation.
-
-They are optional and are not required to deploy or use the application.
-
-Before the first run, Playwright may need browser binaries:
-
-```bash
-npx playwright install
-```
-
-Run visual smoke checks:
-
-```bash
-npm run web:check-ui
-```
-
-Screenshots:
-
-```bash
-npm run web:screenshots
 ```
 
 The `web-dev` environment can use a dev-only `/auth/dev` flow when `WEB_DEV_AUTH_ENABLED=true` and `WEB_DEV_AUTH_TOKEN` is configured.

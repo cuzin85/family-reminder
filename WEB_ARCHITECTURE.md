@@ -199,26 +199,6 @@ There is no service worker in the current version. This avoids stale UI caching 
 
 Web push notifications are not implemented.
 
-## Optional Visual Smoke Checks
-
-Playwright checks are available for development-time UI validation.
-
-They are optional and are not required for deploy.
-
-Commands:
-
-```bash
-npm run web:check-ui
-npm run web:screenshots
-```
-
-The checks can validate:
-
-- admin and ordinary user roles;
-- common viewport sizes;
-- key sections;
-- absence of horizontal overflow.
-
 The `web-dev` environment can use a dev-only `/auth/dev` flow when `WEB_DEV_AUTH_ENABLED=true` and `WEB_DEV_AUTH_TOKEN` is configured.
 
 ## Environments
