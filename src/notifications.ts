@@ -10,6 +10,7 @@ import type { Env } from "./env";
 import { getAppLabels } from "./i18n";
 import { sendTelegramMessage } from "./telegram/client";
 import { buildAdminMainMenuKeyboard, buildMainMenuKeyboard } from "./telegram/menu";
+import { buildTaskNotificationKeyboard } from "./telegram/task-actions";
 
 interface DueNotification {
   task_id: number;
@@ -174,40 +175,17 @@ export async function sendDueTaskNotifications(env: Env, now: string): Promise<n
       ? ` (${ruleTimezone})`
       : "";
     const dueAt = `${formatDateTimeInTimeZone(notification.due_at, taskTimezone)}${timezoneSuffix}`;
-    const closeButtons = [
-      {
-        text: labels.telegram.buttons.done,
-        callback_data: `task:done:${notification.task_id}`
-      },
-      ...(notification.status === "overdue"
-        ? [
-            {
-              text: labels.telegram.buttons.missed,
-              callback_data: `task:miss:${notification.task_id}`
-            }
-          ]
-        : [])
-    ];
-
     try {
       const message = await sendTelegramMessage(
         env,
         notification.telegram_chat_id,
         labels.telegram.notifications.reminder(notification.title, dueAt),
-        {
-          inline_keyboard: [
-            closeButtons,
-            [
-              {
-                text: labels.telegram.buttons.snoozeOneHour,
-                callback_data: `task:snooze:${notification.task_id}`
-              }
-            ],
-            ...(notification.is_admin === 1
-              ? buildAdminMainMenuKeyboard(labels).inline_keyboard
-              : buildMainMenuKeyboard(labels).inline_keyboard)
-          ]
-        }
+        buildTaskNotificationKeyboard(
+          notification.task_id,
+          notification.status,
+          notification.is_admin === 1,
+          labels
+        )
       );
 
       await recordNotification(env, notification, "sent", now, message.message_id, null);

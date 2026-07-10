@@ -84,6 +84,12 @@ import {
   sendTelegramMessage
 } from "./client";
 import { ADMIN_MAIN_MENU_KEYBOARD, MAIN_MENU_KEYBOARD, buildAdminMainMenuKeyboard, buildMainMenuKeyboard } from "./menu";
+import {
+  buildTaskCloseConfirmKeyboard,
+  buildTaskNotificationKeyboard,
+  type TaskCloseAction,
+  type TaskCloseSource
+} from "./task-actions";
 import type { InlineKeyboardMarkup, TelegramUpdate } from "./types";
 import { getTelegramCallbackData, getTelegramUpdateContext, getTelegramUpdateText } from "./update";
 
@@ -481,6 +487,50 @@ function buildDeleteConfirmText(title: string, isRecurring: boolean, labels: App
   }
 
   return `${labels.telegram.deleteConfirm.singleTitle}\n\n${title}\n\n${labels.telegram.deleteConfirm.singleDescription}`;
+}
+
+function isRecurringTask(task: Pick<TelegramTaskListItem, "schedule_type">): boolean {
+  return task.schedule_type !== null && task.schedule_type !== "one_time";
+}
+
+function buildTaskCloseConfirmText(
+  task: Pick<TelegramTaskListItem, "schedule_type" | "status" | "title">,
+  action: TaskCloseAction,
+  labels: AppLabels
+): string {
+  const isRecurring = isRecurringTask(task);
+  const title = action === "miss"
+    ? labels.taskCloseConfirm.missedTitle
+    : task.status === "overdue"
+      ? labels.taskCloseConfirm.completeLateTitle
+      : labels.taskCloseConfirm.completeTitle;
+  const description = action === "miss"
+    ? isRecurring
+      ? labels.taskCloseConfirm.recurringMissedDescription
+      : labels.taskCloseConfirm.singleMissedDescription
+    : isRecurring
+      ? labels.taskCloseConfirm.recurringCompleteDescription
+      : labels.taskCloseConfirm.singleCompleteDescription;
+
+  return `${title}\n\n${task.title}\n\n${description}`;
+}
+
+function buildTaskReminderText(task: TelegramTaskListItem, timezone: string, labels: AppLabels): string {
+  const ruleTimezone = normalizeIanaTimezone(task.rule_timezone);
+  const userTimezone = normalizeIanaTimezone(timezone) ?? timezone;
+  const taskTimezone = ruleTimezone ?? userTimezone;
+  const timezoneSuffix = ruleTimezone && ruleTimezone !== userTimezone ? ` (${ruleTimezone})` : "";
+  const dueAt = `${formatDateTimeInTimeZone(task.due_at, taskTimezone)}${timezoneSuffix}`;
+
+  return labels.telegram.notifications.reminder(task.title, dueAt);
+}
+
+function getTaskCloseSource(update: TelegramUpdate): TaskCloseSource {
+  const hasSnoozeButton = update.callback_query?.message?.reply_markup?.inline_keyboard
+    .flat()
+    .some((button) => button.callback_data.startsWith("task:snooze:"));
+
+  return hasSnoozeButton ? "notification" : "card";
 }
 
 function buildEditFieldKeyboard(taskId: number, scheduleType: string | null, labels: AppLabels): InlineKeyboardMarkup {
@@ -4056,12 +4106,15 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
         );
       }
     }
-  } else if (callbackData?.startsWith("task:done:")) {
-    const taskId = Number(callbackData.slice("task:done:".length));
+  } else if (callbackData?.startsWith("task:close:confirm:")) {
+    const [, , , actionValue, sourceValue, taskIdValue] = callbackData.split(":");
+    const action: TaskCloseAction | null = actionValue === "done" || actionValue === "miss" ? actionValue : null;
+    const source: TaskCloseSource | null = sourceValue === "card" || sourceValue === "notification" ? sourceValue : null;
+    const taskId = Number(taskIdValue);
 
-    if (!Number.isSafeInteger(taskId) || taskId <= 0) {
+    if (!action || !source || !Number.isSafeInteger(taskId) || taskId <= 0) {
       await answerCallbackQuery(env, update.callback_query?.id ?? "", labels.telegram.notices.invalidTask);
-    } else {
+    } else if (action === "done") {
       const result = await completeTaskForUser(env, taskId, storedUser.id, storedUser.is_admin === 1, now);
 
       if (result.status === "not_found_or_closed") {
@@ -4089,12 +4142,6 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
           getMainMenuKeyboard(storedUser.is_admin === 1, labels)
         );
       }
-    }
-  } else if (callbackData?.startsWith("task:miss:")) {
-    const taskId = Number(callbackData.slice("task:miss:".length));
-
-    if (!Number.isSafeInteger(taskId) || taskId <= 0) {
-      await answerCallbackQuery(env, update.callback_query?.id ?? "", labels.telegram.notices.invalidTask);
     } else {
       const result = await missTaskForUser(env, taskId, storedUser.id, storedUser.is_admin === 1, now);
 
@@ -4121,6 +4168,87 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
           labels.telegram.results.missed(resultTitle),
           getMainMenuKeyboard(storedUser.is_admin === 1, labels)
         );
+      }
+    }
+  } else if (callbackData?.startsWith("task:close:cancel:")) {
+    const [, , , actionValue, sourceValue, taskIdValue] = callbackData.split(":");
+    const action: TaskCloseAction | null = actionValue === "done" || actionValue === "miss" ? actionValue : null;
+    const source: TaskCloseSource | null = sourceValue === "card" || sourceValue === "notification" ? sourceValue : null;
+    const taskId = Number(taskIdValue);
+
+    if (!action || !source || !Number.isSafeInteger(taskId) || taskId <= 0) {
+      await answerCallbackQuery(env, update.callback_query?.id ?? "", labels.telegram.notices.invalidTask);
+    } else {
+      const task = await getActiveTaskForViewer(env, taskId, storedUser.id, storedUser.is_admin === 1);
+      const callbackMessageId = update.callback_query?.message?.message_id;
+
+      if (!task) {
+        await answerCallbackQuery(env, update.callback_query?.id ?? "", labels.telegram.notices.notFoundOrClosed);
+      } else {
+        await answerCallbackQuery(env, update.callback_query?.id ?? "", labels.taskCloseConfirm.cancelled);
+        const isNotification = source === "notification";
+        const restoredText = isNotification
+          ? buildTaskReminderText(task, storedUser.timezone, labels)
+          : buildTaskCardText(task, storedUser.timezone, labels);
+        const restoredKeyboard = isNotification
+          ? buildTaskNotificationKeyboard(
+              task.id,
+              task.status === "overdue" ? "overdue" : "pending",
+              storedUser.is_admin === 1,
+              labels
+            )
+          : buildTaskCardKeyboard(task, storedUser.is_admin === 1, labels);
+        const options = isNotification ? undefined : { parseMode: "HTML" as const };
+
+        if (callbackMessageId) {
+          try {
+            await editTelegramMessageText(
+              env,
+              context.chat.id,
+              callbackMessageId,
+              restoredText,
+              restoredKeyboard,
+              options
+            );
+          } catch {
+            await sendTelegramMessage(env, context.chat.id, restoredText, restoredKeyboard, options);
+          }
+        } else {
+          await sendTelegramMessage(env, context.chat.id, restoredText, restoredKeyboard, options);
+        }
+      }
+    }
+  } else if (callbackData?.startsWith("task:done:") || callbackData?.startsWith("task:miss:")) {
+    const action: TaskCloseAction = callbackData.startsWith("task:done:") ? "done" : "miss";
+    const prefix = action === "done" ? "task:done:" : "task:miss:";
+    const taskId = Number(callbackData.slice(prefix.length));
+
+    if (!Number.isSafeInteger(taskId) || taskId <= 0) {
+      await answerCallbackQuery(env, update.callback_query?.id ?? "", labels.telegram.notices.invalidTask);
+    } else {
+      const task = await getActiveTaskForViewer(env, taskId, storedUser.id, storedUser.is_admin === 1);
+
+      if (!task) {
+        await answerCallbackQuery(env, update.callback_query?.id ?? "", labels.telegram.notices.notFoundOrClosed);
+      } else if (action === "miss" && task.status !== "overdue") {
+        await answerCallbackQuery(env, update.callback_query?.id ?? "", labels.telegram.notices.notFoundOrClosedOrNotOverdue);
+      } else {
+        const source = getTaskCloseSource(update);
+        const callbackMessageId = update.callback_query?.message?.message_id;
+        const confirmText = buildTaskCloseConfirmText(task, action, labels);
+        const confirmKeyboard = buildTaskCloseConfirmKeyboard(taskId, action, source, labels);
+
+        await answerCallbackQuery(env, update.callback_query?.id ?? "");
+
+        if (callbackMessageId) {
+          try {
+            await editTelegramMessageText(env, context.chat.id, callbackMessageId, confirmText, confirmKeyboard);
+          } catch {
+            await sendTelegramMessage(env, context.chat.id, confirmText, confirmKeyboard);
+          }
+        } else {
+          await sendTelegramMessage(env, context.chat.id, confirmText, confirmKeyboard);
+        }
       }
     }
   } else if (callbackData?.startsWith("task:cancel:")) {

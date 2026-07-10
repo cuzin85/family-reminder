@@ -77,6 +77,7 @@ type HistoryStatusFilter = "all" | TaskHistoryItem["status"];
 type AppSection = "events" | "history" | "settings" | "tasks";
 type CreateTaskMode = "deadline" | "monthly_fixed" | "monthly_last_days" | "weekly" | "window";
 type SettingsTab = "maintenance" | "users";
+type TaskCloseAction = "complete" | "miss";
 type TaskTab = "my" | "family";
 const HISTORY_PAGE_SIZE = 10;
 const ANNUAL_EVENTS_PAGE_SIZE = 10;
@@ -468,7 +469,7 @@ function TaskCard({
   timezone: string;
   showActions: boolean;
   showAssignees?: boolean;
-  onTaskAction: (taskId: number, action: "complete" | "miss") => void;
+  onTaskAction: (taskId: number, action: TaskCloseAction) => Promise<void>;
   onMonthlyTaskUpdate: (taskId: number, input: MonthlyTaskUpdate) => Promise<void>;
   onTaskUpdate: (taskId: number, input: OneTimeTaskUpdate) => Promise<void>;
   onTaskDelete: (taskId: number) => Promise<void>;
@@ -477,12 +478,14 @@ function TaskCard({
 }) {
   const labels = useI18n();
   const weekdayOptions = getWeekdayOptions(labels);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [assignees, setAssignees] = useState<UserListItem[]>([]);
   const [editError, setEditError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletePreview, setDeletePreview] = useState<TaskDeletePreview | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const [isLoadingDeletePreview, setIsLoadingDeletePreview] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingAssignees, setIsLoadingAssignees] = useState(false);
@@ -498,6 +501,7 @@ function TaskCard({
   const [monthlyEndDay, setMonthlyEndDay] = useState(String(task.monthlyEndDay ?? 5));
   const [monthlyLastDays, setMonthlyLastDays] = useState(String(task.monthlyLastDays ?? 3));
   const [monthlyFirstDays, setMonthlyFirstDays] = useState(String(task.monthlyFirstDays ?? 2));
+  const [pendingAction, setPendingAction] = useState<TaskCloseAction | null>(null);
   const taskTimezone = getTaskTimezone(task.ruleTimezone, timezone);
   const taskTimezoneSuffix = getTaskTimezoneSuffix(task.ruleTimezone, timezone);
   const availableFrom = formatDate(task.availableFrom, taskTimezone, labels);
@@ -511,6 +515,7 @@ function TaskCard({
   const taskTypeLabel = isOneTimeWindow ? labels.scheduleTypes.oneTimeWindow : getScheduleTypeLabel(task.scheduleType, labels);
   const canEdit = (isOneTime || isWeekly || isMonthly) && (user.isAdmin || task.canAct);
   const canMiss = task.status === "overdue";
+  const isRecurring = task.scheduleType !== null && task.scheduleType !== "one_time";
   const hasOneTimeDueChanges = isOneTime && !isOneTimeWindow && (
     dueAt !== formatHtmlDateInput(task.dueAt, timezone) ||
     reminderTime !== (task.reminderTime ?? "09:00")
@@ -599,6 +604,31 @@ function TaskCard({
       })
       .finally(() => {
         setIsDeleting(false);
+      });
+  };
+
+  const startTaskAction = (action: TaskCloseAction) => {
+    setActionError(null);
+    setPendingAction(action);
+  };
+
+  const confirmTaskAction = () => {
+    if (!pendingAction) {
+      return;
+    }
+
+    setActionError(null);
+    setIsClosing(true);
+
+    onTaskAction(task.id, pendingAction)
+      .then(() => {
+        setPendingAction(null);
+      })
+      .catch((error: unknown) => {
+        setActionError(error instanceof Error ? error.message : labels.api.fallbacks.actionFailed);
+      })
+      .finally(() => {
+        setIsClosing(false);
       });
   };
 
@@ -800,7 +830,7 @@ function TaskCard({
       </div>
       {showActions ? (
         <div className={`task-card__actions ${canMiss ? "task-card__actions--with-miss" : ""}`}>
-          <Button className="task-action-complete" variant="primary" type="button" onClick={() => onTaskAction(task.id, "complete")}>
+          <Button className="task-action-complete" variant="primary" type="button" onClick={() => startTaskAction("complete")}>
             <Check size={16} />
             {labels.web.actions.complete}
           </Button>
@@ -811,7 +841,7 @@ function TaskCard({
             </Button>
           ) : null}
           {canMiss ? (
-            <Button className="task-action-miss" variant="warning" type="button" onClick={() => onTaskAction(task.id, "miss")}>
+            <Button className="task-action-miss" variant="warning" type="button" onClick={() => startTaskAction("miss")}>
               <CircleSlash size={16} />
               {labels.web.actions.miss}
             </Button>
@@ -823,6 +853,49 @@ function TaskCard({
         </div>
       ) : null}
       {deleteError && !deletePreview ? <div className="form-error">{deleteError}</div> : null}
+      {pendingAction ? (
+        <Modal
+          title={pendingAction === "miss"
+            ? labels.taskCloseConfirm.missedTitle
+            : task.status === "overdue"
+              ? labels.taskCloseConfirm.completeLateTitle
+              : labels.taskCloseConfirm.completeTitle}
+          description={task.title}
+          onClose={() => {
+            if (!isClosing) {
+              setPendingAction(null);
+            }
+          }}
+        >
+          <div className="task-close-confirm">
+            <p>
+              {pendingAction === "miss"
+                ? isRecurring
+                  ? labels.taskCloseConfirm.recurringMissedDescription
+                  : labels.taskCloseConfirm.singleMissedDescription
+                : isRecurring
+                  ? labels.taskCloseConfirm.recurringCompleteDescription
+                  : labels.taskCloseConfirm.singleCompleteDescription}
+            </p>
+            {actionError ? <div className="form-error">{actionError}</div> : null}
+            <div className="task-card__actions">
+              <Button
+                variant={pendingAction === "miss" ? "warning" : "primary"}
+                type="button"
+                disabled={isClosing}
+                onClick={confirmTaskAction}
+              >
+                {pendingAction === "miss"
+                  ? labels.taskCloseConfirm.confirmMissed
+                  : labels.taskCloseConfirm.confirmComplete}
+              </Button>
+              <Button variant="ghost" type="button" disabled={isClosing} onClick={() => setPendingAction(null)}>
+                {labels.web.actions.cancel}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
       {isEditing ? (
         <Modal
           title={labels.web.actions.edit}
@@ -1147,7 +1220,7 @@ function TaskListContent({
   annualEvents: UpcomingAnnualEventListItem[];
   onAnnualEventDelete: (eventId: number) => Promise<void>;
   onAnnualEventEdit: (eventId: number) => void;
-  onTaskAction: (taskId: number, action: "complete" | "miss") => void;
+  onTaskAction: (taskId: number, action: TaskCloseAction) => Promise<void>;
   onMonthlyTaskUpdate: (taskId: number, input: MonthlyTaskUpdate) => Promise<void>;
   onTaskUpdate: (taskId: number, input: OneTimeTaskUpdate) => Promise<void>;
   onTaskDelete: (taskId: number) => Promise<void>;
@@ -2507,17 +2580,18 @@ function TasksSection({ onOpenAnnualEvent, user }: { onOpenAnnualEvent: (eventId
     return refreshTaskLists();
   }, []);
 
-  const handleTaskAction = (taskId: number, action: "complete" | "miss") => {
+  const handleTaskAction = (taskId: number, action: TaskCloseAction): Promise<void> => {
     const actionRequest = action === "complete" ? completeTask(taskId) : missTask(taskId);
 
     setNotice(null);
 
-    actionRequest
+    return actionRequest
       .then(() => {
         refreshTaskLists();
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         refreshTaskLists(labels.tasks.alreadyChanged);
+        throw error;
       });
   };
 

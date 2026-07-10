@@ -22,6 +22,7 @@ The interface supports Russian and English through the `APP_LOCALE` setting.
 - Personal and family task lists.
 - Personal and family annual-event lists with pagination.
 - Task statuses: active, overdue, done, done late, missed, cancelled.
+- Explicit confirmation before closing a task as done or missed.
 - Reminder notifications through Telegram.
 - "Remind me in 1 hour" action from Telegram notification messages.
 - Admin user management.

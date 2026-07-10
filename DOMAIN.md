@@ -299,9 +299,15 @@ Before `due_at`, completing a task sets status `done`.
 
 After `due_at`, completing a task sets status `done_late`.
 
+Web and Telegram require explicit confirmation before completing a task. For a one-time task, the confirmation explains that the task will move to history. For a recurring task, it explains that only the current occurrence will close and the recurrence will remain enabled.
+
+Cancelling the confirmation restores the original task card and its available actions without changing the task.
+
 ### Miss
 
 Marks an overdue task as `missed`.
+
+Web and Telegram also require explicit confirmation before marking a task as missed. If another assignee closes the shared task first, a later confirmation does not change the data and reports that the task is already closed or unavailable.
 
 ### Cancel/Delete
 
@@ -312,6 +318,8 @@ For a recurring task, delete/cancel deactivates the rule and closes the current 
 ### Snooze
 
 Snooze is available from Telegram notification messages.
+
+Completing a task from a Telegram notification uses the same confirmation step. Cancelling it restores the notification actions, including snooze.
 
 Current behavior:
 

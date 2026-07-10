@@ -201,6 +201,18 @@ export interface AppLabels {
     missed: string;
     overdue: string;
   };
+  taskCloseConfirm: {
+    cancelled: string;
+    completeLateTitle: string;
+    completeTitle: string;
+    confirmComplete: string;
+    confirmMissed: string;
+    missedTitle: string;
+    recurringCompleteDescription: string;
+    recurringMissedDescription: string;
+    singleCompleteDescription: string;
+    singleMissedDescription: string;
+  };
   settings: {
     maintenance: string;
     tabsLabel: string;
@@ -750,6 +762,18 @@ const RU_LABELS: AppLabels = {
     doneLate: "Выполнена с опозданием",
     missed: "Пропущена",
     overdue: "Просрочена"
+  },
+  taskCloseConfirm: {
+    cancelled: "Действие отменено.",
+    completeLateTitle: "Отметить выполненной с опозданием?",
+    completeTitle: "Отметить задачу выполненной?",
+    confirmComplete: "Да, выполнить",
+    confirmMissed: "Да, пропустить",
+    missedTitle: "Отметить задачу пропущенной?",
+    recurringCompleteDescription: "Текущий экземпляр будет закрыт и перемещен в историю. Повторение останется включенным.",
+    recurringMissedDescription: "Текущий экземпляр будет закрыт как пропущенный и перемещен в историю. Повторение останется включенным.",
+    singleCompleteDescription: "Задача будет закрыта и перемещена в историю.",
+    singleMissedDescription: "Задача будет закрыта как пропущенная и перемещена в историю."
   },
   settings: {
     maintenance: "Обслуживание",
@@ -1334,6 +1358,18 @@ const EN_LABELS: AppLabels = {
     doneLate: "Done late",
     missed: "Missed",
     overdue: "Overdue"
+  },
+  taskCloseConfirm: {
+    cancelled: "Action cancelled.",
+    completeLateTitle: "Mark this task as done late?",
+    completeTitle: "Mark this task as done?",
+    confirmComplete: "Yes, mark done",
+    confirmMissed: "Yes, mark missed",
+    missedTitle: "Mark this task as missed?",
+    recurringCompleteDescription: "The current occurrence will be closed and moved to history. The recurrence will remain enabled.",
+    recurringMissedDescription: "The current occurrence will be closed as missed and moved to history. The recurrence will remain enabled.",
+    singleCompleteDescription: "The task will be closed and moved to history.",
+    singleMissedDescription: "The task will be closed as missed and moved to history."
   },
   settings: {
     maintenance: "Maintenance",

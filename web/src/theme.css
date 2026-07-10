@@ -656,7 +656,8 @@ a {
   gap: 12px;
 }
 
-.delete-confirm {
+.delete-confirm,
+.task-close-confirm {
   display: grid;
   gap: 14px;
 }
@@ -698,7 +699,8 @@ a {
   gap: 3px;
 }
 
-.delete-confirm p {
+.delete-confirm p,
+.task-close-confirm p {
   color: #34454e;
   line-height: 1.5;
   margin: 0;

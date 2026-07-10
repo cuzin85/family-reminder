@@ -17,6 +17,7 @@ export interface TelegramMessage {
   from?: TelegramUser;
   chat: TelegramChat;
   text?: string;
+  reply_markup?: InlineKeyboardMarkup;
 }
 
 export interface TelegramCallbackQuery {
