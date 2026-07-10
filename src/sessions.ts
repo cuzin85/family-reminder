@@ -3,6 +3,7 @@ import type { Env } from "./env";
 export const CREATE_ONE_TIME_TASK_SCENARIO = "create_one_time_task";
 export const ADMIN_ADD_USER_SCENARIO = "admin_add_user";
 export const EDIT_TASK_SCENARIO = "edit_task";
+export const AI_CREATE_TASK_SCENARIO = "ai_create_task";
 
 export interface UserSession {
   id: number;
@@ -50,6 +51,20 @@ export interface EditTaskSessionData {
   weekday?: number;
   hour?: number;
   minute?: number;
+}
+
+export type AiCreateTaskMissingField = "title" | "date" | "start_date" | "end_date" | "assignee_mode" | "reminder_time";
+
+export interface AiCreateTaskSessionData {
+  taskType?: "one_time" | "one_time_window";
+  title?: string;
+  assigneeMode?: "self" | "all" | "selected";
+  assigneeUserIds?: number[];
+  assigneeSelectionRequired?: boolean;
+  date?: string;
+  startDate?: string;
+  endDate?: string;
+  reminderTime?: string;
 }
 
 export function getSessionData<T extends object>(session: UserSession): T {
@@ -128,6 +143,30 @@ export async function startEditTaskSession(
     `
   )
     .bind(userId, EDIT_TASK_SCENARIO, JSON.stringify({ taskId, editMessageId }), expiresAt, now, now)
+    .run();
+}
+
+export async function startAiCreateTaskSession(
+  env: Env,
+  userId: number,
+  data: AiCreateTaskSessionData,
+  now: string,
+  step = "confirm"
+): Promise<void> {
+  const expiresAt = new Date(Date.parse(now) + 30 * 60_000).toISOString();
+
+  await env.DB.prepare(
+    `
+      INSERT INTO user_sessions (user_id, scenario, step, data_json, expires_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, scenario) DO UPDATE SET
+        step = excluded.step,
+        data_json = excluded.data_json,
+        expires_at = excluded.expires_at,
+        updated_at = excluded.updated_at
+    `
+  )
+    .bind(userId, AI_CREATE_TASK_SCENARIO, step, JSON.stringify(data), expiresAt, now, now)
     .run();
 }
 

@@ -15,8 +15,12 @@ The interface supports Russian and English through the `APP_LOCALE` setting.
 - Weekly tasks.
 - Monthly tasks by fixed days.
 - Monthly tasks by the last days of the month.
+- Annual events such as birthdays and anniversaries.
+- Configurable annual-event notifications before and on the event date.
 - Shared tasks with one or more assignees.
+- Optional AI-assisted one-time task creation from free-form Telegram text.
 - Personal and family task lists.
+- Personal and family annual-event lists with pagination.
 - Task statuses: active, overdue, done, done late, missed, cancelled.
 - Reminder notifications through Telegram.
 - "Remind me in 1 hour" action from Telegram notification messages.
@@ -36,6 +40,7 @@ The interface supports Russian and English through the `APP_LOCALE` setting.
 - Cloudflare Cron Triggers
 - Cloudflare Worker Secrets
 - Cloudflare Workers Static Assets
+- Cloudflare Workers AI (optional)
 - Telegram Bot API
 - Telegram Login Widget
 - React
@@ -99,6 +104,9 @@ Before deploy, replace placeholder values in `wrangler.jsonc`:
 - Worker names, if you want different names
 - `APP_TIMEZONE`, if `Europe/Kyiv` is not your household timezone
 - `APP_LOCALE`, if you want `en` instead of the default `ru`
+- `ANNUAL_EVENT_NOTIFY_DAYS`, if you want offsets other than `3,1,0`
+- `AI_TASK_CREATION_ENABLED`, if you want to enable AI-assisted task drafts
+- `AI_TASK_CREATION_MODEL`, if you want to use another compatible Workers AI model
 
 The default Worker names in the template are:
 
@@ -153,6 +161,30 @@ If you use the `web-dev` environment:
 ```bash
 npm run d1:migrations:web-dev:remote
 ```
+
+Migration `0008_add_annual_events.sql` creates annual events, recipients, and annual notification log tables. Apply all migrations before using annual events.
+
+## Optional Workers AI Task Drafts
+
+The public template keeps AI task creation disabled by default:
+
+```json
+"AI_TASK_CREATION_ENABLED": "false"
+```
+
+To enable it, change the value to `"true"` in the top-level bot Worker variables. The template already defines the `AI` binding and a default model.
+
+The AI flow currently supports:
+
+- one-time tasks;
+- one-time tasks with a date window;
+- dates, reminder time, title, and assignees from Russian or English text;
+- named active household members;
+- confirmation before a task is created.
+
+The application validates the returned draft and calendar dates before writing anything to D1. Impossible or reversed dates are rejected for correction instead of being silently accepted.
+
+When this feature is enabled, the user's free-form task text and active members' display names/aliases are sent to Cloudflare Workers AI. Telegram IDs, D1 IDs, bot tokens, and session secrets are not included in the AI prompt.
 
 ## Telegram Bot Setup
 
@@ -287,6 +319,7 @@ curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo"
 4. Sign in with Telegram Login.
 5. Add household members from the admin UI.
 6. Create the first task.
+7. Optionally create annual events from the web app.
 
 ## Useful Commands
 
@@ -329,6 +362,17 @@ Task due dates, execution windows, and reminder times are displayed in the timez
 
 The known IANA alias `Europe/Kiev` is normalized to `Europe/Kyiv`.
 
+## Annual Events
+
+Annual events are separate from task instances. They are intended for birthdays, anniversaries, and similar dates.
+
+- Create, edit, delete, and browse annual events in the web app.
+- Assign one or more recipients who should receive Telegram notifications.
+- Upcoming assigned events appear in `My tasks` during the seven days before the event.
+- Full `My events` and `All events` lists remain available in the web app.
+- February 29 events use February 28 in non-leap years.
+- `ANNUAL_EVENT_NOTIFY_DAYS=3,1,0` means three days before, one day before, and on the event day.
+
 ## Data and Privacy
 
 Application data is stored in your Cloudflare D1 database:
@@ -337,6 +381,8 @@ Application data is stored in your Cloudflare D1 database:
 - display names
 - tasks
 - task assignments
+- annual events and recipients
+- annual-event notification logs
 - task history
 - notification logs
 - audit logs
@@ -351,6 +397,7 @@ Telegram bot tokens, webhook secrets, session secrets, and API tokens must be ke
 - Web push notifications are not implemented.
 - Supported UI languages are Russian and English.
 - Free Cloudflare limits should be enough for small household usage, but you should monitor D1 storage, Worker requests, CPU time, and Cron usage in your own Cloudflare dashboard.
+- Workers AI quotas are separate from normal Worker request/CPU limits and may change; monitor AI usage when the optional feature is enabled.
 
 ## License
 

@@ -1,15 +1,18 @@
-import { Check, CheckSquare, CircleSlash, Download, Globe2, History as HistoryIcon, LogIn, LogOut, Pencil, Plus, RefreshCw, ShieldCheck, Square, Trash2 } from "lucide-react";
+import { CalendarHeart, Check, CheckSquare, CircleSlash, Download, Globe2, History as HistoryIcon, LogIn, LogOut, Pencil, Plus, RefreshCw, Settings2, ShieldCheck, Square, Target, Trash2 } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { getAppLabels, type AppLabels, type AppLocale } from "../../src/i18n";
-import type { CurrentUser, HistoryScope, MaintenanceCleanupPreview, MonthlyTaskUpdate, TaskAuditItem, TaskCreateInput, TaskDeletePreview, OneTimeTaskUpdate, TaskHistoryItem, TaskListItem, UserListItem, WeeklyTaskUpdate } from "./api";
+import type { AnnualEventCreateInput, AnnualEventListItem, CurrentUser, HistoryScope, MaintenanceCleanupPreview, MonthlyTaskUpdate, TaskAuditItem, TaskCreateInput, TaskDeletePreview, OneTimeTaskUpdate, TaskHistoryItem, TaskListItem, UpcomingAnnualEventListItem, UserListItem, WeeklyTaskUpdate } from "./api";
 import {
   addUser,
   completeTask,
+  createAnnualEvent,
   createTask,
+  deleteAnnualEvent,
   deleteTask,
   deactivateUser,
   downloadAdminExport,
   getAssignees,
+  getAnnualEvents,
   getAppConfig,
   getCurrentUser,
   getFamilyTasks,
@@ -18,16 +21,19 @@ import {
   getTaskAudit,
   getTaskHistory,
   getTaskDeletePreview,
+  getUpcomingAnnualEvents,
   getUsers,
   missTask,
   runMaintenanceCleanup,
   setApiLabels,
   updateCurrentUserTimezone,
+  updateAnnualEvent,
   updateMonthlyTask,
   updateOneTimeTask,
   updateWeeklyTask
 } from "./api";
 import { Badge, Button, Modal, Panel } from "./components";
+import { buildTaskTimeline } from "./task-timeline";
 
 const DEFAULT_LABELS = getAppLabels("ru");
 const I18nContext = createContext<AppLabels>(DEFAULT_LABELS);
@@ -49,7 +55,7 @@ type ConfigLoadState =
 
 type TaskLoadState =
   | { status: "loading" }
-  | { status: "ready"; tasks: TaskListItem[] }
+  | { status: "ready"; annualEvents: UpcomingAnnualEventListItem[]; tasks: TaskListItem[] }
   | { status: "error"; message: string };
 
 type HistoryLoadState =
@@ -62,14 +68,103 @@ type UsersLoadState =
   | { status: "ready"; users: UserListItem[] }
   | { status: "error"; message: string };
 
+type AnnualEventsLoadState =
+  | { status: "loading" }
+  | { status: "ready"; events: AnnualEventListItem[] }
+  | { status: "error"; message: string };
+
 type HistoryStatusFilter = "all" | TaskHistoryItem["status"];
-type AppSection = "history" | "settings" | "tasks";
+type AppSection = "events" | "history" | "settings" | "tasks";
 type CreateTaskMode = "deadline" | "monthly_fixed" | "monthly_last_days" | "weekly" | "window";
 type SettingsTab = "maintenance" | "users";
 type TaskTab = "my" | "family";
 const HISTORY_PAGE_SIZE = 10;
+const ANNUAL_EVENTS_PAGE_SIZE = 10;
 function getWeekdayOptions(labels: AppLabels): Array<{ value: number; label: string }> {
   return labels.weekdays.map((label, index) => ({ value: index + 1, label }));
+}
+
+function getMonthOptions(labels: AppLabels): Array<{ value: number; label: string }> {
+  return Array.from({ length: 12 }, (_, index) => {
+    const date = new Date(Date.UTC(2026, index, 1));
+
+    return {
+      value: index + 1,
+      label: new Intl.DateTimeFormat(labels.dates.intlLocale, { month: "long", timeZone: "UTC" }).format(date)
+    };
+  });
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function isValidAnnualEventDate(month: number, day: number): boolean {
+  if (!Number.isSafeInteger(month) || !Number.isSafeInteger(day) || month < 1 || month > 12 || day < 1) {
+    return false;
+  }
+
+  if (month === 2 && day === 29) {
+    return true;
+  }
+
+  const lastDay = new Date(Date.UTC(2024, month, 0)).getUTCDate();
+
+  return day <= lastDay;
+}
+
+function formatAnnualEventDate(event: AnnualEventListItem): string {
+  const day = String(event.eventDay).padStart(2, "0");
+  const month = String(event.eventMonth).padStart(2, "0");
+
+  return event.eventYear ? `${day}-${month}-${event.eventYear}` : `${day}-${month}`;
+}
+
+function getAnnualEventOccurrenceYear(event: AnnualEventListItem, occurrenceDate?: string | null): number | null {
+  if (occurrenceDate) {
+    const [year] = occurrenceDate.split("-");
+    const parsedYear = Number(year);
+
+    if (Number.isSafeInteger(parsedYear)) {
+      return parsedYear;
+    }
+  }
+
+  if (event.nextNotificationEventDate) {
+    const [year] = event.nextNotificationEventDate.split("-");
+    const parsedYear = Number(year);
+
+    if (Number.isSafeInteger(parsedYear)) {
+      return parsedYear;
+    }
+  }
+
+  if (event.nextNotificationAt) {
+    const parsedYear = Number(new Intl.DateTimeFormat("en-CA", {
+      timeZone: event.timezone,
+      year: "numeric"
+    }).format(new Date(event.nextNotificationAt)));
+
+    if (Number.isSafeInteger(parsedYear)) {
+      return parsedYear;
+    }
+  }
+
+  return new Date().getUTCFullYear();
+}
+
+function formatAnnualEventYear(event: AnnualEventListItem, labels: AppLabels, occurrenceDate?: string | null): string | null {
+  if (!event.eventYear) {
+    return null;
+  }
+
+  const occurrenceYear = getAnnualEventOccurrenceYear(event, occurrenceDate);
+
+  if (!occurrenceYear || occurrenceYear < event.eventYear) {
+    return String(event.eventYear);
+  }
+
+  return labels.annualEvents.eventYearWithCount(event.eventYear, occurrenceYear - event.eventYear);
 }
 
 function areSameIds(left: number[], right: number[]): boolean {
@@ -684,7 +779,10 @@ function TaskCard({
     <article className="task-card">
       <div className="task-card__main">
         <div className="task-card__title-row">
-          <h3>{task.title}</h3>
+          <h3 className="task-card__title">
+            <Target className="task-card__title-icon" size={18} aria-hidden="true" />
+            <span className="task-card__title-text">{task.title}</span>
+          </h3>
           <TaskAuditButton taskId={task.id} taskTitle={task.title} timezone={timezone} />
         </div>
         <div className="task-card__meta">
@@ -904,8 +1002,138 @@ function TaskCard({
   );
 }
 
+function AnnualEventTaskCard({
+  event,
+  onDelete,
+  onEdit,
+  showRecipients
+}: {
+  event: UpcomingAnnualEventListItem;
+  onDelete: (eventId: number) => Promise<void>;
+  onEdit: (eventId: number) => void;
+  showRecipients: boolean;
+}) {
+  const labels = useI18n();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const eventYearText = formatAnnualEventYear(event, labels, event.upcomingEventDate);
+
+  const removeEvent = () => {
+    if (!window.confirm(labels.annualEvents.deleteConfirm)) {
+      return;
+    }
+
+    setDeleteError(null);
+    setIsDeleting(true);
+
+    onDelete(event.id)
+      .catch((error: unknown) => {
+        setDeleteError(error instanceof Error ? error.message : labels.api.fallbacks.deleteAnnualEventFailed);
+      })
+      .finally(() => {
+        setIsDeleting(false);
+      });
+  };
+
+  return (
+    <article className="task-card annual-event-card">
+      <div className="task-card__main">
+        <div className="task-card__title-row">
+          <h3 className="task-card__title">
+            <CalendarHeart className="task-card__title-icon" size={18} aria-hidden="true" />
+            <span className="task-card__title-text">{event.title}</span>
+          </h3>
+        </div>
+        <div className="task-card__meta">
+          <span>{labels.navigation.events}</span>
+          <span>{labels.annualEvents.dateLabel}: {htmlDateToDisplay(event.upcomingEventDate)}</span>
+          {eventYearText ? <span>{labels.annualEvents.eventYear}: {eventYearText}</span> : null}
+          <span>{labels.annualEvents.reminderTime}: {event.reminderTime} ({event.timezone})</span>
+          <span>
+            {labels.annualEvents.nextNotification}: {event.nextNotificationAt
+              ? formatDateTime(event.nextNotificationAt, event.timezone, labels)
+              : labels.annualEvents.noNextNotification}
+          </span>
+          {showRecipients && event.recipientNames ? <span>{labels.annualEvents.recipients}: {event.recipientNames}</span> : null}
+        </div>
+      </div>
+      <div className="task-card__badges">
+        <Badge tone="neutral">{labels.navigation.events}</Badge>
+      </div>
+      {event.canManage ? (
+        <div className="task-card__actions">
+          <Button className="task-action-edit" variant="secondary" type="button" onClick={() => onEdit(event.id)}>
+            <Pencil size={16} />
+            {labels.web.actions.edit}
+          </Button>
+          <Button className="task-action-delete" variant="danger" type="button" disabled={isDeleting} onClick={removeEvent}>
+            <Trash2 size={16} />
+            {isDeleting ? labels.web.actions.deleting : labels.web.actions.delete}
+          </Button>
+        </div>
+      ) : null}
+      {deleteError ? <div className="form-error">{deleteError}</div> : null}
+    </article>
+  );
+}
+
+function AnnualEventListCard({
+  event,
+  onDelete,
+  onEdit
+}: {
+  event: AnnualEventListItem;
+  onDelete: (event: AnnualEventListItem) => void;
+  onEdit: (event: AnnualEventListItem) => void;
+}) {
+  const labels = useI18n();
+  const eventYearText = formatAnnualEventYear(event, labels);
+
+  return (
+    <article className="task-card annual-event-card">
+      <div className="task-card__main">
+        <div className="task-card__title-row">
+          <h3 className="task-card__title">
+            <CalendarHeart className="task-card__title-icon" size={18} aria-hidden="true" />
+            <span className="task-card__title-text">{event.title}</span>
+          </h3>
+        </div>
+        <div className="task-card__meta">
+          <span>{labels.annualEvents.dateLabel}: {formatAnnualEventDate(event)}</span>
+          {eventYearText ? <span>{labels.annualEvents.eventYear}: {eventYearText}</span> : null}
+          <span>{labels.annualEvents.reminderTime}: {event.reminderTime} ({event.timezone})</span>
+          <span>
+            {labels.annualEvents.nextNotification}: {event.nextNotificationAt
+              ? formatDateTime(event.nextNotificationAt, event.timezone, labels)
+              : labels.annualEvents.noNextNotification}
+          </span>
+          {event.recipientNames ? <span>{labels.annualEvents.recipients}: {event.recipientNames}</span> : null}
+        </div>
+      </div>
+      <div className="task-card__badges">
+        <Badge tone="neutral">{labels.navigation.events}</Badge>
+      </div>
+      {event.canManage ? (
+        <div className="task-card__actions">
+          <Button className="task-action-edit" variant="secondary" type="button" onClick={() => onEdit(event)}>
+            <Pencil size={16} />
+            {labels.web.actions.edit}
+          </Button>
+          <Button className="task-action-delete" variant="danger" type="button" onClick={() => onDelete(event)}>
+            <Trash2 size={16} />
+            {labels.web.actions.delete}
+          </Button>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
 function TaskListContent({
   emptyText,
+  annualEvents,
+  onAnnualEventDelete,
+  onAnnualEventEdit,
   onTaskAction,
   onMonthlyTaskUpdate,
   onTaskUpdate,
@@ -916,6 +1144,9 @@ function TaskListContent({
   user
 }: {
   emptyText: string;
+  annualEvents: UpcomingAnnualEventListItem[];
+  onAnnualEventDelete: (eventId: number) => Promise<void>;
+  onAnnualEventEdit: (eventId: number) => void;
   onTaskAction: (taskId: number, action: "complete" | "miss") => void;
   onMonthlyTaskUpdate: (taskId: number, input: MonthlyTaskUpdate) => Promise<void>;
   onTaskUpdate: (taskId: number, input: OneTimeTaskUpdate) => Promise<void>;
@@ -935,18 +1166,28 @@ function TaskListContent({
     return <div className="empty-state empty-state--error">{state.message}</div>;
   }
 
-  if (state.tasks.length === 0) {
+  if (state.tasks.length === 0 && annualEvents.length === 0) {
     return <div className="empty-state">{emptyText}</div>;
   }
 
+  const timeline = buildTaskTimeline(state.tasks, annualEvents, user.timezone);
+
   return (
     <div className="task-list">
-      {state.tasks.map((task) => (
+      {timeline.map((item) => item.kind === "event" ? (
+        <AnnualEventTaskCard
+          key={`annual-event-${item.event.id}`}
+          event={item.event}
+          onDelete={onAnnualEventDelete}
+          onEdit={onAnnualEventEdit}
+          showRecipients={showAssignees}
+        />
+      ) : (
         <TaskCard
-          key={task.id}
-          task={task}
+          key={`task-${item.task.id}`}
+          task={item.task}
           timezone={user.timezone}
-          showActions={user.isAdmin || task.canAct}
+          showActions={user.isAdmin || item.task.canAct}
           showAssignees={showAssignees}
           onTaskAction={onTaskAction}
           onMonthlyTaskUpdate={onMonthlyTaskUpdate}
@@ -969,7 +1210,10 @@ function HistoryCard({ task, timezone }: { task: TaskHistoryItem; timezone: stri
     <article className="task-card">
       <div className="task-card__main">
         <div className="task-card__title-row">
-          <h3>{task.title}</h3>
+          <h3 className="task-card__title">
+            <Target className="task-card__title-icon" size={18} aria-hidden="true" />
+            <span className="task-card__title-text">{task.title}</span>
+          </h3>
           <TaskAuditButton taskId={task.id} taskTitle={task.title} timezone={timezone} />
         </div>
         <div className="task-card__meta">
@@ -1490,6 +1734,422 @@ function SettingsSection({ user }: { user: CurrentUser }) {
   );
 }
 
+function AnnualEventModal({
+  event,
+  onClose,
+  onSaved,
+  user
+}: {
+  event: AnnualEventListItem | null;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+  user: CurrentUser;
+}) {
+  const labels = useI18n();
+  const monthOptions = getMonthOptions(labels);
+  const [assignees, setAssignees] = useState<UserListItem[]>([]);
+  const [day, setDay] = useState(event ? String(event.eventDay) : "1");
+  const [eventYear, setEventYear] = useState(event?.eventYear ? String(event.eventYear) : "");
+  const [error, setError] = useState<string | null>(null);
+  const [isLoadingAssignees, setIsLoadingAssignees] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [month, setMonth] = useState(event?.eventMonth ?? 1);
+  const [reminderTime, setReminderTime] = useState(event?.reminderTime ?? "09:00");
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<number[]>(event?.recipientIds.length ? event.recipientIds : [user.id]);
+  const [title, setTitle] = useState(event?.title ?? "");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    getAssignees()
+      .then((users) => {
+        if (isMounted) {
+          setAssignees(users);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (isMounted) {
+          setError(loadError instanceof Error ? loadError.message : labels.web.validation.loadingAssigneesFailed);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingAssignees(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const toggleRecipient = (userId: number) => {
+    setSelectedRecipientIds((current) => (
+      current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId]
+    ));
+  };
+
+  const toggleAllRecipients = () => {
+    const allAssigneeIds = assignees.map((assignee) => assignee.id);
+
+    setSelectedRecipientIds((current) => (
+      areSameIds(current, allAssigneeIds) ? [] : allAssigneeIds
+    ));
+  };
+
+  const saveAnnualEvent = () => {
+    const trimmedTitle = title.trim();
+    const parsedDay = Number(day);
+    const parsedYear = eventYear.trim() ? Number(eventYear) : null;
+
+    if (trimmedTitle.length === 0 || trimmedTitle.length > 200) {
+      setError(labels.annualEvents.titleRequired);
+      return;
+    }
+
+    if (!isValidAnnualEventDate(month, parsedDay)) {
+      setError(labels.web.validation.invalidDueDate);
+      return;
+    }
+
+    if (parsedYear !== null && (!Number.isSafeInteger(parsedYear) || parsedYear < 1 || parsedYear > 9999)) {
+      setError(labels.web.validation.invalidDueDate);
+      return;
+    }
+
+    if (month === 2 && parsedDay === 29 && parsedYear !== null && !isLeapYear(parsedYear)) {
+      setError(labels.web.validation.invalidDueDate);
+      return;
+    }
+
+    if (selectedRecipientIds.length === 0) {
+      setError(labels.annualEvents.recipientsRequired);
+      return;
+    }
+
+    const input: AnnualEventCreateInput = {
+      title: trimmedTitle,
+      description: event?.description ?? null,
+      eventMonth: month,
+      eventDay: parsedDay,
+      eventYear: parsedYear,
+      reminderTime,
+      recipientUserIds: selectedRecipientIds
+    };
+
+    setError(null);
+    setIsSaving(true);
+
+    const request = event
+      ? updateAnnualEvent(event.id, input)
+      : createAnnualEvent(input);
+
+    request
+      .then(() => {
+        onSaved(event ? labels.tasks.updated : labels.annualEvents.created);
+      })
+      .catch((saveError: unknown) => {
+        setError(saveError instanceof Error ? saveError.message : labels.api.fallbacks.createAnnualEventFailed);
+      })
+      .finally(() => {
+        setIsSaving(false);
+      });
+  };
+
+  return (
+    <Modal
+      title={event ? labels.web.actions.edit : labels.annualEvents.createTitle}
+      description={labels.web.messages.datesInTimezone(user.timezone)}
+      onClose={() => {
+        if (!isSaving) {
+          onClose();
+        }
+      }}
+    >
+      <form className="task-edit-form" onSubmit={(submitEvent) => {
+        submitEvent.preventDefault();
+        saveAnnualEvent();
+      }}>
+        <label className="field">
+          <span>{labels.annualEvents.titleField}</span>
+          <input value={title} maxLength={200} onChange={(inputEvent) => setTitle(inputEvent.target.value)} />
+        </label>
+        <div className="field-grid field-grid--annual-event">
+          <label className="field">
+            <span>{labels.annualEvents.month}</span>
+            <select className="select" value={month} onChange={(inputEvent) => setMonth(Number(inputEvent.target.value))}>
+              {monthOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.annualEvents.day}</span>
+            <input type="number" min={1} max={31} value={day} onChange={(inputEvent) => setDay(inputEvent.target.value)} />
+          </label>
+          <label className="field">
+            <span>{labels.annualEvents.eventYear}</span>
+            <input type="number" min={1} max={9999} placeholder={labels.annualEvents.eventYearHint} value={eventYear} onChange={(inputEvent) => setEventYear(inputEvent.target.value)} />
+          </label>
+          <label className="field">
+            <span>{labels.annualEvents.reminderTime}</span>
+            <input type="time" value={reminderTime} onChange={(inputEvent) => setReminderTime(inputEvent.target.value)} />
+          </label>
+        </div>
+        <fieldset className="assignee-field">
+          <legend>
+            <span>{labels.annualEvents.recipients}</span>
+            {assignees.length > 0 ? (
+              <button className="assignee-toggle" type="button" onClick={toggleAllRecipients}>
+                {areSameIds(selectedRecipientIds, assignees.map((assignee) => assignee.id)) ? <CheckSquare size={16} /> : <Square size={16} />}
+                <span>{areSameIds(selectedRecipientIds, assignees.map((assignee) => assignee.id)) ? labels.web.actions.unchooseAll : labels.web.actions.chooseAll}</span>
+              </button>
+            ) : null}
+          </legend>
+          {isLoadingAssignees ? <span className="muted-text">{labels.web.messages.loadingAssignees}</span> : null}
+          {assignees.map((assignee) => (
+            <label key={assignee.id} className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={selectedRecipientIds.includes(assignee.id)}
+                onChange={() => toggleRecipient(assignee.id)}
+              />
+              <span>{assignee.displayName}</span>
+            </label>
+          ))}
+        </fieldset>
+        {error ? <div className="form-error">{error}</div> : null}
+        <div className="task-card__actions">
+          <Button variant="primary" type="submit" disabled={isSaving || isLoadingAssignees}>
+            {isSaving
+              ? labels.web.actions.saving
+              : event
+                ? labels.web.actions.save
+                : labels.web.actions.create}
+          </Button>
+          <Button variant="ghost" type="button" disabled={isSaving} onClick={onClose}>
+            {labels.web.actions.cancel}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AnnualEventsSection({
+  requestedEditEventId,
+  onEditRequestHandled,
+  user
+}: {
+  requestedEditEventId: number | null;
+  onEditRequestHandled: () => void;
+  user: CurrentUser;
+}) {
+  const labels = useI18n();
+  const [error, setError] = useState<string | null>(null);
+  const [modalEvent, setModalEvent] = useState<AnnualEventListItem | null | undefined>(undefined);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [scope, setScope] = useState<HistoryScope>("my");
+  const [state, setState] = useState<AnnualEventsLoadState>({ status: "loading" });
+
+  const loadAnnualEvents = (message?: string) => {
+    if (message) {
+      setNotice(message);
+    }
+
+    setState({ status: "loading" });
+
+    getAnnualEvents(scope)
+      .then((events) => {
+        setState({ status: "ready", events });
+      })
+      .catch((loadError: unknown) => {
+        setState({
+          status: "error",
+          message: loadError instanceof Error ? loadError.message : labels.annualEvents.loadFailed
+        });
+      });
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    setState({ status: "loading" });
+    getAnnualEvents(scope)
+      .then((events) => {
+        if (isMounted) {
+          setState({ status: "ready", events });
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (isMounted) {
+          setState({
+            status: "error",
+            message: loadError instanceof Error ? loadError.message : labels.annualEvents.loadFailed
+          });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [scope]);
+
+  useEffect(() => {
+    if (requestedEditEventId === null || state.status !== "ready") {
+      return;
+    }
+
+    const event = state.events.find((item) => item.id === requestedEditEventId);
+
+    if (event) {
+      setError(null);
+      setNotice(null);
+      setModalEvent(event);
+      onEditRequestHandled();
+    } else if (scope === "my") {
+      setPage(0);
+      setState({ status: "loading" });
+      setScope("family");
+    } else {
+      setError(labels.api.fallbacks.getAnnualEventsFailed);
+      onEditRequestHandled();
+    }
+  }, [onEditRequestHandled, requestedEditEventId, scope, state]);
+
+  const openCreateModal = () => {
+    setError(null);
+    setNotice(null);
+    setModalEvent(null);
+  };
+
+  const removeAnnualEvent = (event: AnnualEventListItem) => {
+    if (!window.confirm(labels.annualEvents.deleteConfirm)) {
+      return;
+    }
+
+    deleteAnnualEvent(event.id)
+      .then(() => {
+        loadAnnualEvents(labels.annualEvents.deleted);
+      })
+      .catch((deleteError: unknown) => {
+        setError(deleteError instanceof Error ? deleteError.message : labels.api.fallbacks.deleteAnnualEventFailed);
+      });
+  };
+
+  const totalEvents = state.status === "ready" ? state.events.length : 0;
+  const lastPage = Math.max(0, Math.ceil(totalEvents / ANNUAL_EVENTS_PAGE_SIZE) - 1);
+  const currentPage = Math.min(page, lastPage);
+  const pageStart = currentPage * ANNUAL_EVENTS_PAGE_SIZE;
+  const visibleEvents = state.status === "ready"
+    ? state.events.slice(pageStart, pageStart + ANNUAL_EVENTS_PAGE_SIZE)
+    : [];
+  const emptyText = scope === "my" ? labels.annualEvents.emptyMy : labels.annualEvents.emptyFamily;
+
+  return (
+    <Panel className="tasks-panel annual-events-panel" title={labels.annualEvents.title} description={labels.annualEvents.description}>
+      <div className="task-toolbar task-toolbar--tasks sticky-panel-toolbar">
+        <div className="tabs" role="tablist" aria-label={labels.annualEvents.listLabel}>
+          <button
+            className={`tab ${scope === "my" ? "tab--active" : ""}`}
+            type="button"
+            role="tab"
+            aria-selected={scope === "my"}
+            onClick={() => {
+              setPage(0);
+              setScope("my");
+            }}
+          >
+            {labels.annualEvents.myTab}
+          </button>
+          <button
+            className={`tab ${scope === "family" ? "tab--active" : ""}`}
+            type="button"
+            role="tab"
+            aria-selected={scope === "family"}
+            onClick={() => {
+              setPage(0);
+              setScope("family");
+            }}
+          >
+            {labels.annualEvents.familyTab}
+          </button>
+        </div>
+        <Button className="button--icon-mobile" variant="ghost" type="button" title={labels.common.refresh} aria-label={labels.common.refresh} onClick={() => loadAnnualEvents()}>
+          <RefreshCw size={16} />
+          <span className="button__text">{labels.common.refresh}</span>
+        </Button>
+        <Button variant="primary" type="button" onClick={openCreateModal}>
+          <Plus size={18} />
+          {labels.web.actions.create}
+        </Button>
+      </div>
+
+      {notice ? <div className="notice">{notice}</div> : null}
+      {error ? <div className="form-error">{error}</div> : null}
+      {state.status === "loading" ? <div className="empty-state">{labels.annualEvents.loading}</div> : null}
+      {state.status === "error" ? <div className="empty-state empty-state--error">{state.message}</div> : null}
+      {state.status === "ready" && state.events.length === 0 ? <div className="empty-state">{emptyText}</div> : null}
+      {state.status === "ready" && visibleEvents.length > 0 ? (
+        <div className="task-list annual-event-list">
+          {visibleEvents.map((event) => (
+            <AnnualEventListCard
+              key={event.id}
+              event={event}
+              onDelete={removeAnnualEvent}
+              onEdit={(nextEvent) => {
+                setError(null);
+                setNotice(null);
+                setModalEvent(nextEvent);
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
+      {state.status === "ready" ? (
+        <div className="pagination">
+          <Button
+            variant="ghost"
+            type="button"
+            disabled={currentPage === 0}
+            onClick={() => setPage(Math.max(0, currentPage - 1))}
+          >
+            {labels.common.back}
+          </Button>
+          <span>
+            {labels.annualEvents.records(
+              totalEvents === 0 ? 0 : pageStart + 1,
+              Math.min(pageStart + visibleEvents.length, totalEvents),
+              totalEvents
+            )}
+          </span>
+          <Button
+            variant="ghost"
+            type="button"
+            disabled={currentPage >= lastPage}
+            onClick={() => setPage(Math.min(lastPage, currentPage + 1))}
+          >
+            {labels.common.next}
+          </Button>
+        </div>
+      ) : null}
+      {modalEvent !== undefined ? (
+        <AnnualEventModal
+          key={modalEvent?.id ?? "create"}
+          event={modalEvent}
+          user={user}
+          onClose={() => setModalEvent(undefined)}
+          onSaved={(message) => {
+            setModalEvent(undefined);
+            loadAnnualEvents(message);
+          }}
+        />
+      ) : null}
+    </Panel>
+  );
+}
+
 function CreateTaskModal({
   onClose,
   onCreated,
@@ -1791,7 +2451,7 @@ function CreateTaskModal({
   );
 }
 
-function TasksSection({ user }: { user: CurrentUser }) {
+function TasksSection({ onOpenAnnualEvent, user }: { onOpenAnnualEvent: (eventId: number) => void; user: CurrentUser }) {
   const labels = useI18n();
   const [activeTab, setActiveTab] = useState<TaskTab>("my");
   const [familyTasks, setFamilyTasks] = useState<TaskLoadState>({ status: "loading" });
@@ -1808,10 +2468,10 @@ function TasksSection({ user }: { user: CurrentUser }) {
     setMyTasks({ status: "loading" });
     let isMounted = true;
 
-    getMyTasks()
-      .then((tasks) => {
+    Promise.all([getMyTasks(), getUpcomingAnnualEvents("my")])
+      .then(([tasks, annualEvents]) => {
         if (isMounted) {
-          setMyTasks({ status: "ready", tasks });
+          setMyTasks({ status: "ready", annualEvents, tasks });
         }
       })
       .catch((error: unknown) => {
@@ -1826,7 +2486,7 @@ function TasksSection({ user }: { user: CurrentUser }) {
     getFamilyTasks()
       .then((tasks) => {
         if (isMounted) {
-          setFamilyTasks({ status: "ready", tasks });
+          setFamilyTasks({ status: "ready", annualEvents: [], tasks });
         }
       })
       .catch((error: unknown) => {
@@ -1901,7 +2561,16 @@ function TasksSection({ user }: { user: CurrentUser }) {
     });
   };
 
+  const handleAnnualEventDelete = (eventId: number) => {
+    setNotice(null);
+
+    return deleteAnnualEvent(eventId).then(() => {
+      refreshTaskLists(labels.annualEvents.deleted);
+    });
+  };
+
   const visibleState = activeTab === "my" ? myTasks : familyTasks;
+  const visibleAnnualEvents = visibleState.status === "ready" ? visibleState.annualEvents : [];
   const visibleEmptyText = activeTab === "my" ? labels.tasks.emptyMy : labels.tasks.emptyFamily;
 
   return (
@@ -1938,7 +2607,10 @@ function TasksSection({ user }: { user: CurrentUser }) {
       </div>
       {notice ? <div className="notice">{notice}</div> : null}
       <TaskListContent
+        annualEvents={visibleAnnualEvents}
         emptyText={visibleEmptyText}
+        onAnnualEventDelete={handleAnnualEventDelete}
+        onAnnualEventEdit={onOpenAnnualEvent}
         onTaskAction={handleTaskAction}
         onMonthlyTaskUpdate={handleMonthlyTaskUpdate}
         onTaskUpdate={handleTaskUpdate}
@@ -2125,6 +2797,12 @@ function AccountTimezoneButton({
 function AppView({ onUserUpdate, user }: { onUserUpdate: (user: CurrentUser) => void; user: CurrentUser }) {
   const labels = useI18n();
   const [activeSection, setActiveSection] = useState<AppSection>("tasks");
+  const [annualEventEditRequestId, setAnnualEventEditRequestId] = useState<number | null>(null);
+
+  const openAnnualEventEditor = (eventId: number) => {
+    setAnnualEventEditRequestId(eventId);
+    setActiveSection("events");
+  };
 
   return (
     <main className="app-shell">
@@ -2162,18 +2840,27 @@ function AppView({ onUserUpdate, user }: { onUserUpdate: (user: CurrentUser) => 
         </section>
 
         <section className="section-tabs" aria-label={labels.navigation.appSections}>
-          <div className="tabs tabs--sections" role="tablist" aria-label={labels.navigation.appSections}>
-            <button
-              className={`tab ${activeSection === "tasks" ? "tab--active" : ""}`}
-              type="button"
+          <div className={`tabs tabs--sections ${user.isAdmin ? "tabs--sections-admin" : ""}`} role="tablist" aria-label={labels.navigation.appSections}>
+          <button
+            className={`tab ${activeSection === "tasks" ? "tab--active" : ""}`}
+            type="button"
               role="tab"
               aria-selected={activeSection === "tasks"}
               onClick={() => setActiveSection("tasks")}
-            >
-              {labels.navigation.tasks}
-            </button>
-            <button
-              className={`tab ${activeSection === "history" ? "tab--active" : ""}`}
+          >
+            {labels.navigation.tasks}
+          </button>
+          <button
+            className={`tab ${activeSection === "events" ? "tab--active" : ""}`}
+            type="button"
+            role="tab"
+            aria-selected={activeSection === "events"}
+            onClick={() => setActiveSection("events")}
+          >
+            {labels.navigation.events}
+          </button>
+          <button
+            className={`tab ${activeSection === "history" ? "tab--active" : ""}`}
               type="button"
               role="tab"
               aria-selected={activeSection === "history"}
@@ -2183,19 +2870,29 @@ function AppView({ onUserUpdate, user }: { onUserUpdate: (user: CurrentUser) => 
             </button>
             {user.isAdmin ? (
               <button
-                className={`tab ${activeSection === "settings" ? "tab--active" : ""}`}
+                className={`tab tab--settings ${activeSection === "settings" ? "tab--active" : ""}`}
                 type="button"
                 role="tab"
                 aria-selected={activeSection === "settings"}
+                aria-label={labels.navigation.settings}
+                title={labels.navigation.settings}
                 onClick={() => setActiveSection("settings")}
               >
-                {labels.navigation.settings}
+                <Settings2 className="tab__icon" size={18} aria-hidden="true" />
+                <span className="tab__label">{labels.navigation.settings}</span>
               </button>
             ) : null}
           </div>
         </section>
 
-        {activeSection === "tasks" ? <TasksSection user={user} /> : null}
+        {activeSection === "tasks" ? <TasksSection user={user} onOpenAnnualEvent={openAnnualEventEditor} /> : null}
+        {activeSection === "events" ? (
+          <AnnualEventsSection
+            requestedEditEventId={annualEventEditRequestId}
+            user={user}
+            onEditRequestHandled={() => setAnnualEventEditRequestId(null)}
+          />
+        ) : null}
         {activeSection === "history" ? <HistorySection user={user} /> : null}
         {activeSection === "settings" ? <SettingsSection user={user} /> : null}
       </div>

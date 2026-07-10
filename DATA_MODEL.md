@@ -13,6 +13,7 @@ The actual schema is defined by SQL migrations in `migrations/`. This document i
 - `0005_add_user_admin_flag.sql` - `users.is_admin`.
 - `0006_add_audit_log.sql` - audit log.
 - `0007_add_maintenance_cleanup_indexes.sql` - cleanup indexes.
+- `0008_add_annual_events.sql` - annual events, recipients, notification state, and delivery log.
 
 ## General Rules
 
@@ -287,6 +288,69 @@ Stores Telegram guided flow state.
 | `created_at` | text not null | Created timestamp |
 | `updated_at` | text not null | Updated timestamp |
 
+## `annual_events`
+
+Stores birthdays, anniversaries, and other calendar dates that repeat annually.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | integer primary key | Annual event ID |
+| `created_by_user_id` | integer not null | Creator user ID |
+| `title` | text not null | Event title |
+| `description` | text null | Optional description |
+| `event_month` | integer not null | Month, 1 through 12 |
+| `event_day` | integer not null | Day, 1 through 31; calendar validity is checked by application logic |
+| `event_year` | integer null | Optional original year for age/anniversary display |
+| `reminder_hour` | integer not null | Notification hour in event timezone |
+| `reminder_minute` | integer not null | Notification minute in event timezone |
+| `timezone` | text not null | IANA timezone defining the event schedule |
+| `notification_days_json` | text not null | Notification offsets copied from configuration |
+| `next_notification_at` | text null | Next due notification timestamp in UTC |
+| `next_notification_event_date` | text null | Event occurrence associated with the next notification |
+| `next_notification_offset_days` | integer null | Offset for the next notification |
+| `is_active` | integer not null | 1 active, 0 deleted/deactivated |
+| `created_at` | text not null | Created timestamp |
+| `updated_at` | text not null | Updated timestamp |
+
+Indexes support creator lookup, active-event lists, and scheduled processing by `next_notification_at`.
+
+## `annual_event_recipients`
+
+Stores users who should see and receive notifications for an annual event.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | integer primary key | Row ID |
+| `annual_event_id` | integer not null | Annual event ID |
+| `user_id` | integer not null | Recipient user ID |
+| `created_at` | text not null | Created timestamp |
+
+Constraint:
+
+- unique on (`annual_event_id`, `user_id`).
+
+## `annual_event_notification_log`
+
+Stores annual-event delivery attempts and provides idempotency.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | integer primary key | Delivery row ID |
+| `annual_event_id` | integer not null | Annual event ID |
+| `user_id` | integer not null | Recipient user ID |
+| `event_date` | text not null | Calendar occurrence being notified |
+| `offset_days` | integer not null | Days before the occurrence |
+| `scheduled_for` | text not null | Planned UTC notification time |
+| `sent_at` | text null | Successful send time |
+| `telegram_message_id` | integer null | Telegram message ID |
+| `status` | text not null | `sent`, `failed`, or `skipped` |
+| `error_message` | text null | Compact delivery error |
+| `created_at` | text not null | Created timestamp |
+
+Constraint:
+
+- unique on (`annual_event_id`, `user_id`, `event_date`, `offset_days`).
+
 ## `telegram_message_refs`
 
 Stores bot-generated Telegram message references that can be deleted later.
@@ -359,6 +423,10 @@ Select task instances where:
 - `next_remind_at` is not null;
 - `next_remind_at` is less than or equal to current time.
 
+### Due Annual-Event Notifications
+
+Select active annual events where `next_notification_at` is not null and is less than or equal to current time. Join only active recipients and use the annual notification log uniqueness constraint to avoid duplicate sends.
+
 ### History
 
 Select closed task instances with statuses:
@@ -378,3 +446,5 @@ Always paginate history queries.
 - Keep rule assignees and instance assignees separate.
 - Do not delete users when disabling access.
 - Do not store secrets in D1.
+- Keep annual event recipients separate from task assignees.
+- Recalculate `next_notification_at` after annual event schedule changes and after each processed notification.

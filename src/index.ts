@@ -1,10 +1,13 @@
 import type { Env } from "./env";
+import { handleDevAiTaskDraft } from "./ai/task-draft";
+import { recalculateAnnualEventNotificationSchedule } from "./annual-events";
 import { apiErrorResponse, jsonResponse, methodNotAllowedResponse, notFoundResponse, withApiErrorHandling } from "./http";
 import { normalizeAppLocale } from "./i18n";
-import { sendDueTaskNotifications } from "./notifications";
+import { sendDueAnnualEventNotifications, sendDueTaskNotifications } from "./notifications";
 import { generateMonthlyTaskInstances, generateWeeklyTaskInstances, markOverdueTasks } from "./tasks";
 import { handleTelegramWebhook } from "./telegram/webhook";
 import { getAuthenticatedWebUser, handleDevLogin, handleLogout, handleTelegramLoginCallback, type AuthenticatedWebUser } from "./web/auth";
+import { handleCreateAnnualEvent, handleDeleteAnnualEvent, handleGetAnnualEvents, handleGetUpcomingAnnualEvents, handleUpdateAnnualEvent } from "./web/annual-events";
 import { handleExportData } from "./web/export";
 import { handleGetMaintenanceCleanupPreview, handleRunMaintenanceCleanup } from "./web/maintenance";
 import {
@@ -35,6 +38,25 @@ function isResponse(value: AuthenticatedWebUser | Response): value is Response {
   return value instanceof Response;
 }
 
+async function runScheduledTasks(env: Env, now: string): Promise<void> {
+  await recalculateAnnualEventNotificationSchedule(env, now);
+  await markOverdueTasks(env, now);
+  await sendDueTaskNotifications(env, now);
+  await sendDueAnnualEventNotifications(env, now);
+  await generateWeeklyTaskInstances(env, now);
+  await generateMonthlyTaskInstances(env, now);
+}
+
+function isValidDevToken(request: Request, env: Env): boolean {
+  const expectedToken = env.WEB_DEV_AUTH_TOKEN;
+
+  if (!expectedToken) {
+    return false;
+  }
+
+  return request.headers.get("x-dev-auth-token") === expectedToken;
+}
+
 async function handleApiRequest(request: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === "/api/health") {
     return request.method === "GET"
@@ -57,6 +79,10 @@ async function handleApiRequest(request: Request, env: Env, url: URL): Promise<R
         }
       })
       : methodNotAllowedResponse();
+  }
+
+  if (url.pathname === "/api/dev/ai/task-draft") {
+    return handleDevAiTaskDraft(request, env);
   }
 
   if (url.pathname === "/api/me") {
@@ -163,6 +189,64 @@ async function handleApiRequest(request: Request, env: Env, url: URL): Promise<R
     const user = await getRequiredWebUser(request, env);
 
     return isResponse(user) ? user : handleGetAssignees(env);
+  }
+
+  if (url.pathname === "/api/annual-events") {
+    if (request.method !== "GET" && request.method !== "POST") {
+      return methodNotAllowedResponse();
+    }
+
+    const user = await getRequiredWebUser(request, env);
+
+    if (isResponse(user)) {
+      return user;
+    }
+
+    return request.method === "GET"
+      ? handleGetAnnualEvents(request, env, user)
+      : handleCreateAnnualEvent(request, env, user);
+  }
+
+  if (url.pathname === "/api/annual-events/upcoming/my" || url.pathname === "/api/annual-events/upcoming/family") {
+    if (request.method !== "GET") {
+      return methodNotAllowedResponse();
+    }
+
+    const user = await getRequiredWebUser(request, env);
+
+    if (isResponse(user)) {
+      return user;
+    }
+
+    return handleGetUpcomingAnnualEvents(
+      env,
+      user,
+      url.pathname.endsWith("/family") ? "family" : "my"
+    );
+  }
+
+  const annualEventDeleteMatch = url.pathname.match(/^\/api\/annual-events\/(\d+)$/);
+
+  if (annualEventDeleteMatch) {
+    if (request.method !== "DELETE" && request.method !== "PATCH") {
+      return methodNotAllowedResponse();
+    }
+
+    const user = await getRequiredWebUser(request, env);
+
+    if (isResponse(user)) {
+      return user;
+    }
+
+    const annualEventId = Number(annualEventDeleteMatch[1]);
+
+    if (!Number.isSafeInteger(annualEventId) || annualEventId <= 0) {
+      return apiErrorResponse("invalid_annual_event", 400);
+    }
+
+    return request.method === "DELETE"
+      ? handleDeleteAnnualEvent(env, user, annualEventId)
+      : handleUpdateAnnualEvent(request, env, user, annualEventId);
   }
 
   if (url.pathname === "/api/admin/export") {
@@ -413,6 +497,18 @@ export default {
       return handleLogout();
     }
 
+    if (request.method === "POST" && url.pathname === "/__scheduled") {
+      if (!isValidDevToken(request, env)) {
+        return apiErrorResponse("forbidden", 403);
+      }
+
+      const now = new Date().toISOString();
+
+      await runScheduledTasks(env, now);
+
+      return jsonResponse({ ok: true, now });
+    }
+
     if (url.pathname.startsWith("/api/")) {
       return withApiErrorHandling(() => handleApiRequest(request, env, url));
     }
@@ -421,11 +517,6 @@ export default {
   },
 
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
-    const now = new Date().toISOString();
-
-    await markOverdueTasks(env, now);
-    await sendDueTaskNotifications(env, now);
-    await generateWeeklyTaskInstances(env, now);
-    await generateMonthlyTaskInstances(env, now);
+    await runScheduledTasks(env, new Date().toISOString());
   }
 };

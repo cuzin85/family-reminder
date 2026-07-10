@@ -16,6 +16,7 @@ A production deployment usually contains:
 - one Cron Trigger on the bot Worker;
 - Cloudflare Worker Secrets;
 - Cloudflare Workers Static Assets for the web UI.
+- optional Cloudflare Workers AI binding for text-to-task drafts.
 
 The bot Worker owns:
 
@@ -72,6 +73,7 @@ In Cloudflare Dashboard, check both Workers separately:
 - Cron executions;
 - D1 metrics;
 - D1 storage.
+- Workers AI neurons/usage when AI task creation is enabled.
 
 Bot Worker errors do not necessarily mean the web app is broken. Web Worker errors do not necessarily mean Telegram webhook processing is broken.
 
@@ -131,6 +133,34 @@ If reminders do not arrive:
 6. Check Telegram API errors in Worker logs.
 7. Check Cloudflare Worker CPU/errors.
 
+Annual-event notifications use the same Cron Trigger. If they do not arrive:
+
+1. Confirm migration `0008_add_annual_events.sql` was applied.
+2. Check that the event is active and has active recipients.
+3. Check `next_notification_at` and `annual_event_notification_log`.
+4. Confirm `ANNUAL_EVENT_NOTIFY_DAYS` contains the intended offsets.
+5. Check the event timezone and notification time.
+
+## Optional Workers AI
+
+AI-assisted task drafts are controlled by:
+
+- `AI_TASK_CREATION_ENABLED`;
+- `AI_TASK_CREATION_MODEL`;
+- the bot Worker's `AI` binding.
+
+The public template defaults to `AI_TASK_CREATION_ENABLED=false`.
+
+If AI drafting does not respond:
+
+1. Confirm the feature is enabled on the bot Worker.
+2. Confirm the top-level Worker has an `AI` binding.
+3. Check Workers AI usage and model availability in Cloudflare Dashboard.
+4. Check bot Worker logs for validation or model errors.
+5. Verify normal guided task creation still works as a fallback.
+
+Do not log full prompts, tokens, Telegram IDs, or session secrets while troubleshooting.
+
 ## Locale and Timezone
 
 `APP_LOCALE` controls interface language. Supported values:
@@ -146,6 +176,7 @@ After creation, timezone values are stored in D1:
 
 - `users.timezone` - the user's current timezone preference;
 - `reminder_rules.timezone` - the timezone that defines the task rule.
+- `annual_events.timezone` - the timezone that defines an annual event and its notification time.
 
 Date and reminder behavior:
 
@@ -160,6 +191,8 @@ Date and reminder behavior:
 The known IANA alias `Europe/Kiev` is normalized to `Europe/Kyiv`.
 
 Changing `APP_TIMEZONE` later only affects new default values. It does not rewrite existing users, task rules, task instances, `due_at`, or `next_remind_at`.
+
+`ANNUAL_EVENT_NOTIFY_DAYS` is read when an annual event is created or its schedule is recalculated. Existing events keep their stored `notification_days_json` until they are updated.
 
 If you need to change the household timezone for an existing deployment, plan it as a data migration:
 
@@ -322,6 +355,8 @@ Before risky migrations:
 3. Apply the migration.
 4. Run smoke checks.
 
+Migration `0008_add_annual_events.sql` adds annual events and their notification log. After applying it, verify event creation in the web app and one scheduled Telegram notification before relying on the feature.
+
 ## D1 Backup
 
 Create a D1 export before risky operations:
@@ -372,6 +407,8 @@ GET /api/admin/export
 
 The export is intended as an application-level snapshot. It is not a full SQL backup.
 
+Current exports include annual events, recipients, and annual-event notification history in addition to task data.
+
 Use D1 SQL export for database-level backup and portable JSON export for migration-oriented data review.
 
 ## Maintenance Cleanup
@@ -386,6 +423,7 @@ It should not delete:
 - task history;
 - audit log;
 - assignments.
+- annual events and recipients.
 
 Use preview before running cleanup.
 
@@ -400,6 +438,7 @@ Before making a deployment public or sharing access:
 - check that `ALLOWED_TELEGRAM_USER_IDS` contains the intended bootstrap admins;
 - check that ordinary users cannot access admin endpoints;
 - check that old D1 exports are not committed.
+- if AI is enabled, check that the configured model and expected Workers AI usage are acceptable.
 
 ## Routine Change Checklist
 

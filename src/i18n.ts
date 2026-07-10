@@ -1,5 +1,45 @@
 export type AppLocale = "en" | "ru";
 
+function formatRuYearCount(count: number): string {
+  const abs = Math.abs(count);
+  const lastTwo = abs % 100;
+  const lastOne = abs % 10;
+
+  if (lastTwo >= 11 && lastTwo <= 14) {
+    return "лет";
+  }
+
+  if (lastOne === 1) {
+    return "год";
+  }
+
+  if (lastOne >= 2 && lastOne <= 4) {
+    return "года";
+  }
+
+  return "лет";
+}
+
+function formatRuDayCount(count: number): string {
+  const abs = Math.abs(count);
+  const lastTwo = abs % 100;
+  const lastOne = abs % 10;
+
+  if (lastTwo >= 11 && lastTwo <= 14) {
+    return "дней";
+  }
+
+  if (lastOne === 1) {
+    return "день";
+  }
+
+  if (lastOne >= 2 && lastOne <= 4) {
+    return "дня";
+  }
+
+  return "дней";
+}
+
 export interface AppLabels {
   audit: {
     actions: Record<string, string>;
@@ -47,14 +87,17 @@ export interface AppLabels {
       addUserFailed: string;
       badResponse: string;
       configFailed: string;
+      createAnnualEventFailed: string;
       createTaskFailed: string;
       deactivateUserFailed: string;
+      deleteAnnualEventFailed: string;
       deletePreviewFailed: string;
       deleteTaskFailed: string;
       exportFailed: string;
       getAssigneesFailed: string;
       getAuditFailed: string;
       getCurrentUserFailed: string;
+      getAnnualEventsFailed: string;
       getHistoryFailed: string;
       getTasksFailed: string;
       getUsersFailed: string;
@@ -109,9 +152,40 @@ export interface AppLabels {
   };
   navigation: {
     appSections: string;
+    events: string;
     history: string;
     settings: string;
     tasks: string;
+  };
+  annualEvents: {
+    created: string;
+    createTitle: string;
+    dateLabel: string;
+    day: string;
+    deleted: string;
+    deleteConfirm: string;
+    description: string;
+    empty: string;
+    emptyFamily: string;
+    emptyMy: string;
+    eventYear: string;
+    eventYearHint: string;
+    eventYearWithCount: (year: number, count: number) => string;
+    loadFailed: string;
+    listLabel: string;
+    loading: string;
+    familyTab: string;
+    myTab: string;
+    month: string;
+    nextNotification: string;
+    noNextNotification: string;
+    recipients: string;
+    recipientsRequired: string;
+    records: (start: number, end: number, total: number) => string;
+    reminderTime: string;
+    title: string;
+    titleField: string;
+    titleRequired: string;
   };
   scheduleTypes: {
     monthly: string;
@@ -173,6 +247,49 @@ export interface AppLabels {
       all: string;
       selected: string;
       self: string;
+    };
+    aiTaskDraft: {
+      assigneeAll: string;
+      assigneeSelf: string;
+      buttons: {
+        cancel: string;
+        create: string;
+      };
+      cancelled: string;
+      createFailed: string;
+      dateIssues: {
+        date_in_past: string;
+        invalid_date: string;
+        invalid_end_date: string;
+        invalid_start_date: string;
+        window_end_in_past: string;
+        window_start_after_end: string;
+      };
+      fields: {
+        assignees: string;
+        date: string;
+        missing: string;
+        reminderTime: string;
+        taskType: string;
+        title: string;
+        window: string;
+      };
+      invalidAssignee: string;
+      missingFields: Record<string, string>;
+      notTask: string;
+      selectAssignees: string;
+      prompts: {
+        assignee: string;
+        date: string;
+        windowEndDate: string;
+        windowStartDate: string;
+        reminderTime: string;
+        title: string;
+      };
+      title: string;
+      taskTypeOneTime: string;
+      taskTypeOneTimeWindow: string;
+      expired: string;
     };
     buttons: {
       cancel: string;
@@ -296,6 +413,7 @@ export interface AppLabels {
       start: string;
     };
     notifications: {
+      annualEvent: (title: string, eventDate: string, offsetDays: number) => string;
       reminder: (title: string, dueAt: string) => string;
     };
     notices: {
@@ -504,6 +622,7 @@ const RU_LABELS: AppLabels = {
   api: {
     errors: {
       due_at_in_past: "Дата и время срока должны быть в будущем.",
+      invalid_annual_event: "Проверьте название, дату, время уведомления и получателей события.",
       invalid_timezone: "Введите корректный IANA timezone, например Europe/Kyiv.",
       invalid_assignees: "Выберите хотя бы одного исполнителя.",
       invalid_available_from: "Введите корректную дату начала окна.",
@@ -518,14 +637,17 @@ const RU_LABELS: AppLabels = {
       badResponse: "Некорректный ответ API.",
       cleanupPreviewFailed: "Не удалось подготовить preview очистки.",
       configFailed: "Не удалось получить настройки приложения.",
+      createAnnualEventFailed: "Не удалось создать ежегодное событие.",
       createTaskFailed: "Не удалось создать задачу.",
       deactivateUserFailed: "Не удалось отключить пользователя.",
+      deleteAnnualEventFailed: "Не удалось удалить ежегодное событие.",
       deletePreviewFailed: "Не удалось подготовить удаление задачи.",
       deleteTaskFailed: "Не удалось удалить задачу.",
       exportFailed: "Не удалось подготовить export.",
       getAssigneesFailed: "Не удалось получить список исполнителей.",
       getAuditFailed: "Не удалось получить последние действия.",
       getCurrentUserFailed: "Не удалось получить текущего пользователя.",
+      getAnnualEventsFailed: "Не удалось получить ежегодные события.",
       getHistoryFailed: "Не удалось получить историю задач.",
       getTasksFailed: "Не удалось получить список задач.",
       getUsersFailed: "Не удалось получить список пользователей.",
@@ -580,9 +702,40 @@ const RU_LABELS: AppLabels = {
   },
   navigation: {
     appSections: "Разделы приложения",
+    events: "События",
     history: "История",
     settings: "Настройки",
     tasks: "Задачи"
+  },
+  annualEvents: {
+    created: "Событие создано.",
+    createTitle: "Новое событие",
+    dateLabel: "Дата события",
+    day: "День",
+    deleted: "Событие удалено.",
+    deleteConfirm: "Удалить это ежегодное событие?",
+    description: "Дни рождения, годовщины и другие даты. Они появляются в списке «Мои задачи» только за 7 дней до события.",
+    empty: "Ежегодных событий пока нет.",
+    emptyFamily: "Семейных событий пока нет.",
+    emptyMy: "У вас пока нет назначенных событий.",
+    eventYear: "Год события",
+    eventYearHint: "Необязательно",
+    eventYearWithCount: (year, count) => `${year} (${count} ${formatRuYearCount(count)})`,
+    loadFailed: "Не удалось загрузить ежегодные события.",
+    listLabel: "Списки ежегодных событий",
+    loading: "Загрузка событий...",
+    familyTab: "Все события",
+    myTab: "Мои события",
+    month: "Месяц",
+    nextNotification: "Следующее уведомление",
+    noNextNotification: "Не рассчитано",
+    recipients: "Получатели",
+    recipientsRequired: "Выберите хотя бы одного получателя.",
+    records: (start, end, total) => total === 0 ? "0 событий" : `${start}-${end} из ${total}`,
+    reminderTime: "Время уведомления",
+    title: "Ежегодные события",
+    titleField: "Название",
+    titleRequired: "Введите название события.",
   },
   scheduleTypes: {
     monthly: "Ежемесячная",
@@ -644,6 +797,56 @@ const RU_LABELS: AppLabels = {
       all: "Всем",
       selected: "Выбрать участников",
       self: "Только мне"
+    },
+    aiTaskDraft: {
+      assigneeAll: "всем",
+      assigneeSelf: "мне",
+      buttons: {
+        cancel: "Отмена",
+        create: "Создать"
+      },
+      cancelled: "AI-черновик отменен.",
+      createFailed: "AI-черновик не удалось создать как задачу. Отправьте текст задачи еще раз.",
+      dateIssues: {
+        date_in_past: "Указанная дата уже прошла. Введите будущую дату.",
+        invalid_date: "AI распознал некорректную дату. Введите дату заново.",
+        invalid_end_date: "AI распознал некорректную дату окончания окна. Введите дату окончания заново.",
+        invalid_start_date: "AI распознал некорректную дату начала окна. Введите дату начала заново.",
+        window_end_in_past: "Дата окончания окна уже прошла. Введите будущую дату окончания.",
+        window_start_after_end: "Начало окна не может быть позже окончания. Введите новую дату окончания."
+      },
+      fields: {
+        assignees: "Исполнители",
+        date: "Дата",
+        missing: "Не хватает",
+        reminderTime: "Время напоминания",
+        taskType: "Тип",
+        title: "Название",
+        window: "Окно"
+      },
+      invalidAssignee: "Исполнители не распознаны. Ответьте «мне» или «всем» либо выберите участников кнопками.",
+      missingFields: {
+        assignee_mode: "исполнители",
+        date: "дата",
+        end_date: "дата окончания окна",
+        reminder_time: "время напоминания",
+        start_date: "дата начала окна",
+        title: "название"
+      },
+      notTask: "Я могу помочь создать напоминание. Например: 10 июля проверить кран.",
+      selectAssignees: "Проверьте и выберите исполнителей кнопками.",
+      prompts: {
+        assignee: "Кому назначить задачу? Ответьте «мне» или «всем» либо выберите участников кнопками.",
+        date: "Введите дату выполнения в формате dd-mm-yyyy. Например: 10-07-2026",
+        windowEndDate: "Введите дату окончания окна в формате dd-mm-yyyy. Например: 12-07-2026",
+        windowStartDate: "Введите дату начала окна в формате dd-mm-yyyy. Например: 10-07-2026",
+        reminderTime: "Введите время напоминания в формате HH:mm. Например: 09:00",
+        title: "Введите короткое название задачи."
+      },
+      title: "AI разобрал сообщение как черновик задачи:",
+      taskTypeOneTime: "разовая",
+      taskTypeOneTimeWindow: "разовая с окном",
+      expired: "AI-черновик устарел. Отправьте текст задачи еще раз."
     },
     buttons: {
       cancel: "Отмена",
@@ -773,6 +976,11 @@ const RU_LABELS: AppLabels = {
       start: "Привет. Я семейный бот напоминаний."
     },
     notifications: {
+      annualEvent: (title, eventDate, offsetDays) => {
+        const when = offsetDays === 0 ? "сегодня" : `через ${offsetDays} ${formatRuDayCount(offsetDays)}`;
+
+        return `Ежегодное событие: ${title}\nДата события: ${eventDate} (${when})`;
+      },
       reminder: (title, dueAt) => `Напоминание: ${title}\nСрок: ${dueAt}`
     },
     notices: {
@@ -998,6 +1206,7 @@ const EN_LABELS: AppLabels = {
   api: {
     errors: {
       due_at_in_past: "Due date and reminder time must be in the future.",
+      invalid_annual_event: "Check the event title, date, notification time, and recipients.",
       invalid_timezone: "Enter a valid IANA timezone, for example Europe/Kyiv.",
       invalid_assignees: "Choose at least one assignee.",
       invalid_available_from: "Enter a valid window start date.",
@@ -1012,14 +1221,17 @@ const EN_LABELS: AppLabels = {
       badResponse: "Invalid API response.",
       cleanupPreviewFailed: "Failed to prepare cleanup preview.",
       configFailed: "Failed to load application config.",
+      createAnnualEventFailed: "Failed to create annual event.",
       createTaskFailed: "Failed to create task.",
       deactivateUserFailed: "Failed to disable user.",
+      deleteAnnualEventFailed: "Failed to delete annual event.",
       deletePreviewFailed: "Failed to prepare task deletion.",
       deleteTaskFailed: "Failed to delete task.",
       exportFailed: "Failed to prepare export.",
       getAssigneesFailed: "Failed to load assignees.",
       getAuditFailed: "Failed to load recent activity.",
       getCurrentUserFailed: "Failed to load current user.",
+      getAnnualEventsFailed: "Failed to load annual events.",
       getHistoryFailed: "Failed to load task history.",
       getTasksFailed: "Failed to load tasks.",
       getUsersFailed: "Failed to load users.",
@@ -1074,9 +1286,40 @@ const EN_LABELS: AppLabels = {
   },
   navigation: {
     appSections: "Application sections",
+    events: "Events",
     history: "History",
     settings: "Settings",
     tasks: "Tasks"
+  },
+  annualEvents: {
+    created: "Event created.",
+    createTitle: "New event",
+    dateLabel: "Event date",
+    day: "Day",
+    deleted: "Event deleted.",
+    deleteConfirm: "Delete this annual event?",
+    description: "Birthdays, anniversaries, and other dates. They appear in the \"My tasks\" list only 7 days before the event.",
+    empty: "There are no annual events yet.",
+    emptyFamily: "There are no family events yet.",
+    emptyMy: "You do not have any assigned events yet.",
+    eventYear: "Event year",
+    eventYearHint: "Optional",
+    eventYearWithCount: (year, count) => `${year} (${count} ${count === 1 ? "year" : "years"})`,
+    loadFailed: "Failed to load annual events.",
+    listLabel: "Annual event lists",
+    loading: "Loading events...",
+    familyTab: "All events",
+    myTab: "My events",
+    month: "Month",
+    nextNotification: "Next notification",
+    noNextNotification: "Not scheduled",
+    recipients: "Recipients",
+    recipientsRequired: "Choose at least one recipient.",
+    records: (start, end, total) => total === 0 ? "0 events" : `${start}-${end} of ${total}`,
+    reminderTime: "Notification time",
+    title: "Annual events",
+    titleField: "Title",
+    titleRequired: "Enter event title."
   },
   scheduleTypes: {
     monthly: "Monthly",
@@ -1138,6 +1381,56 @@ const EN_LABELS: AppLabels = {
       all: "Everyone",
       selected: "Choose members",
       self: "Only me"
+    },
+    aiTaskDraft: {
+      assigneeAll: "everyone",
+      assigneeSelf: "me",
+      buttons: {
+        cancel: "Cancel",
+        create: "Create"
+      },
+      cancelled: "AI draft cancelled.",
+      createFailed: "The AI draft could not be created as a task. Send the task text again.",
+      dateIssues: {
+        date_in_past: "The specified date has already passed. Enter a future date.",
+        invalid_date: "AI recognized an invalid date. Enter the date again.",
+        invalid_end_date: "AI recognized an invalid window end date. Enter the end date again.",
+        invalid_start_date: "AI recognized an invalid window start date. Enter the start date again.",
+        window_end_in_past: "The window end date has already passed. Enter a future end date.",
+        window_start_after_end: "The window start cannot be later than its end. Enter a new end date."
+      },
+      fields: {
+        assignees: "Assignees",
+        date: "Date",
+        missing: "Missing",
+        reminderTime: "Reminder time",
+        taskType: "Type",
+        title: "Title",
+        window: "Window"
+      },
+      invalidAssignee: "Assignees were not recognized. Reply with “me” or “everyone”, or choose members with the buttons.",
+      missingFields: {
+        assignee_mode: "assignees",
+        date: "date",
+        end_date: "window end date",
+        reminder_time: "reminder time",
+        start_date: "window start date",
+        title: "title"
+      },
+      notTask: "I can help create a reminder. For example: check the faucet on July 10.",
+      selectAssignees: "Review and select the assignees with the buttons.",
+      prompts: {
+        assignee: "Who should do this task? Reply with “me” or “everyone”, or choose members with the buttons.",
+        date: "Enter the due date in dd-mm-yyyy format. For example: 10-07-2026",
+        windowEndDate: "Enter the window end date in dd-mm-yyyy format. For example: 12-07-2026",
+        windowStartDate: "Enter the window start date in dd-mm-yyyy format. For example: 10-07-2026",
+        reminderTime: "Enter the reminder time in HH:mm format. For example: 09:00",
+        title: "Enter a short task title."
+      },
+      title: "AI parsed your message as a task draft:",
+      taskTypeOneTime: "one-time",
+      taskTypeOneTimeWindow: "one-time with window",
+      expired: "The AI draft has expired. Send the task text again."
     },
     buttons: {
       cancel: "Cancel",
@@ -1261,6 +1554,11 @@ const EN_LABELS: AppLabels = {
       start: "Hi. I am the family reminder bot."
     },
     notifications: {
+      annualEvent: (title, eventDate, offsetDays) => {
+        const when = offsetDays === 0 ? "today" : `in ${offsetDays} ${offsetDays === 1 ? "day" : "days"}`;
+
+        return `Annual event: ${title}\nEvent date: ${eventDate} (${when})`;
+      },
       reminder: (title, dueAt) => `Reminder: ${title}\nDue: ${dueAt}`
     },
     notices: {

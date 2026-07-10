@@ -28,12 +28,21 @@
     }
   ],
 
+  // Workers AI is used only by the optional Telegram text-to-task flow.
+  "ai": {
+    "binding": "AI"
+  },
+
   // Non-secret defaults. Real secrets are configured with `wrangler secret put`.
   "vars": {
     "APP_LOCALE": "ru",
     "APP_TIMEZONE": "Europe/Kyiv",
+    "ANNUAL_EVENT_NOTIFY_DAYS": "3,1,0",
     // Public Telegram bot username without @.
-    "TELEGRAM_BOT_USERNAME": "your_bot_username"
+    "TELEGRAM_BOT_USERNAME": "your_bot_username",
+    // Set to "true" to allow one-time task drafts from free-form Telegram text.
+    "AI_TASK_CREATION_ENABLED": "false",
+    "AI_TASK_CREATION_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
   },
 
   "env": {
@@ -60,6 +69,7 @@
       "vars": {
         "APP_LOCALE": "ru",
         "APP_TIMEZONE": "Europe/Kyiv",
+        "ANNUAL_EVENT_NOTIFY_DAYS": "3,1,0",
         "TELEGRAM_BOT_USERNAME": "your_bot_username",
         "WEB_DEV_AUTH_ENABLED": "true"
       }
@@ -88,6 +98,7 @@
       "vars": {
         "APP_LOCALE": "ru",
         "APP_TIMEZONE": "Europe/Kyiv",
+        "ANNUAL_EVENT_NOTIFY_DAYS": "3,1,0",
         "TELEGRAM_BOT_USERNAME": "your_bot_username"
       }
     }

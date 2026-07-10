@@ -7,6 +7,7 @@ The project is intended for a small trusted group, such as a family or shared ho
 ## Goals
 
 - Help household members remember recurring and one-time tasks.
+- Track annual household events such as birthdays and anniversaries.
 - Support shared tasks with multiple assignees.
 - Keep Telegram as the primary notification channel.
 - Provide a web interface for task management, history, users, export, and maintenance.
@@ -24,7 +25,7 @@ The project is intended for a small trusted group, such as a family or shared ho
 - Complex project management workflows.
 - Native mobile apps.
 - Web push notifications.
-- Internationalization in the current version.
+- Voice transcription for task creation.
 
 ## Target Users
 
@@ -47,6 +48,7 @@ Expected scale:
 - Replace a filter.
 - Complete a one-time task by a specific date.
 - Complete a one-time task during a specific date window.
+- Remember a birthday or anniversary every year.
 
 ## Main Interfaces
 
@@ -58,6 +60,7 @@ Telegram is used for:
 - quick task actions;
 - viewing active tasks;
 - creating tasks through guided flows;
+- optionally creating one-time task drafts from free-form text;
 - editing or deleting tasks;
 - completing, missing, or snoozing reminders;
 - basic user administration.
@@ -74,6 +77,7 @@ The web app is used for:
 - audit log review;
 - portable JSON export;
 - maintenance cleanup.
+- annual event creation, editing, and full-list browsing.
 
 ## Task Types
 
@@ -85,6 +89,8 @@ The application supports:
 - monthly task by fixed days;
 - monthly task by the last days of the month;
 - monthly task with end-of-month plus beginning-of-next-month window.
+
+Annual events are modeled separately from tasks. They have recipients and notification offsets, but no task completion status.
 
 ## Access Model
 
@@ -115,6 +121,7 @@ The system stores:
 - notification logs;
 - audit logs;
 - web sessions.
+- annual events, recipients, and annual notification delivery logs.
 
 Data must survive deploys, Worker restarts, and idle periods.
 
@@ -136,13 +143,15 @@ The preferred deployment target is Cloudflare:
 - Cloudflare Cron Triggers;
 - Cloudflare Worker Secrets;
 - Workers Static Assets.
+- Cloudflare Workers AI for optional text-to-task parsing.
 
-Telegram Bot API is the only required external API.
+Telegram Bot API is required. Cloudflare Workers AI is optional and can be disabled through configuration.
 
 ## Current Limitations
 
-- The UI language is Russian.
+- The UI supports Russian and English, selected per deployment.
 - Web push notifications are not implemented.
 - Telegram remains the only notification channel.
 - The project assumes a trusted household, not untrusted public users.
 - Deployment requires manual Cloudflare and BotFather setup.
+- AI task creation supports one-time tasks and one-time windows, not recurring schedules or annual events.

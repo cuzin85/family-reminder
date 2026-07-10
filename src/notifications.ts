@@ -1,4 +1,10 @@
-import { getAppConfig } from "./config";
+import { getAppConfig, serializeAnnualEventNotifyDays } from "./config";
+import {
+  formatAnnualEventDisplayDate,
+  getDueAnnualEventNotifications,
+  recordAnnualEventNotification,
+  updateAnnualEventNextNotification
+} from "./annual-events";
 import { formatDateTimeInTimeZone, getNextDailyReminderWithinWindow, normalizeIanaTimezone } from "./dates";
 import type { Env } from "./env";
 import { getAppLabels } from "./i18n";
@@ -218,6 +224,54 @@ export async function sendDueTaskNotifications(env: Env, now: string): Promise<n
     }
 
     await updateNextReminderForTask(env, notification.task_id, getNextReminderAfterNotification(notification), now);
+  }
+
+  return sentCount;
+}
+
+export async function sendDueAnnualEventNotifications(env: Env, now: string): Promise<number> {
+  const config = getAppConfig(env);
+  const labels = getAppLabels(config.appLocale);
+  const notificationDaysJson = serializeAnnualEventNotifyDays(config.annualEventNotifyDays);
+  const notifications = await getDueAnnualEventNotifications(env, now, notificationDaysJson);
+  let sentCount = 0;
+
+  for (const notification of notifications) {
+    const eventDate = notification.next_notification_event_date
+      ? formatAnnualEventDisplayDate(notification.next_notification_event_date)
+      : "";
+    const offsetDays = notification.next_notification_offset_days ?? 0;
+
+    try {
+      const message = await sendTelegramMessage(
+        env,
+        notification.telegram_chat_id,
+        labels.telegram.notifications.annualEvent(notification.title, eventDate, offsetDays),
+        notification.is_admin === 1
+          ? buildAdminMainMenuKeyboard(labels)
+          : buildMainMenuKeyboard(labels)
+      );
+
+      await recordAnnualEventNotification(env, notification, "sent", now, message.message_id, null);
+      sentCount += 1;
+    } catch (error) {
+      await recordAnnualEventNotification(
+        env,
+        notification,
+        "failed",
+        now,
+        null,
+        error instanceof Error ? error.message : "Unknown annual event notification error"
+      );
+    }
+
+    await updateAnnualEventNextNotification(
+      env,
+      notification,
+      notification.next_notification_at ?? now,
+      config.annualEventNotifyDays,
+      notificationDaysJson
+    );
   }
 
   return sentCount;

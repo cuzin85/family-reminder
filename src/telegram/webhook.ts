@@ -1,5 +1,15 @@
 import { getAppConfig } from "../config";
 import { recordAuditEvent } from "../audit";
+import { formatAnnualEventDisplayDate, getUpcomingAnnualEventsForUser } from "../annual-events";
+import {
+  buildSafeAiTaskDraftErrorLog,
+  isAiAssigneeEditIntent,
+  mergeTaskDraftWithText,
+  parseTaskDraftFromText,
+  type AiAssigneeCandidate,
+  type AiTaskDraft,
+  type AiTaskDraftDateIssue
+} from "../ai/task-draft";
 import { getAppLabels, type AppLabels } from "../i18n";
 import {
   formatDateInTimeZone,
@@ -13,15 +23,19 @@ import {
 import type { Env } from "../env";
 import { jsonResponse } from "../http";
 import {
+  AI_CREATE_TASK_SCENARIO,
   ADMIN_ADD_USER_SCENARIO,
   CREATE_ONE_TIME_TASK_SCENARIO,
   EDIT_TASK_SCENARIO,
   clearUserSession,
   getActiveUserSession,
   getSessionData,
+  startAiCreateTaskSession,
   startAdminAddUserSession,
   startCreateTaskSession,
   startEditTaskSession,
+  type AiCreateTaskMissingField,
+  type AiCreateTaskSessionData,
   updateUserSession,
   type CreateOneTimeTaskSessionData,
   type EditTaskSessionData,
@@ -78,6 +92,7 @@ function validateTelegramWebhookSecret(request: Request, env: Env): boolean {
 }
 
 type TelegramTaskListItem = Awaited<ReturnType<typeof getActiveTasksForUser>>[number];
+type TelegramAnnualEventListItem = Awaited<ReturnType<typeof getUpcomingAnnualEventsForUser>>[number];
 
 function buildAdminAddUserKeyboard(labels: AppLabels): InlineKeyboardMarkup {
   return {
@@ -99,6 +114,24 @@ function buildCreateCancelKeyboard(labels: AppLabels): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [{ text: labels.telegram.buttons.cancel, callback_data: "task:create:cancel" }]
+    ]
+  };
+}
+
+function buildAiTaskDraftKeyboard(labels: AppLabels): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: labels.telegram.aiTaskDraft.buttons.create, callback_data: "ai:create:confirm" }],
+      [{ text: labels.telegram.assigneeModes.selected, callback_data: "ai:create:assignees:edit" }],
+      [{ text: labels.telegram.aiTaskDraft.buttons.cancel, callback_data: "ai:create:cancel" }]
+    ]
+  };
+}
+
+function buildAiTaskDraftCancelKeyboard(labels: AppLabels): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: labels.telegram.aiTaskDraft.buttons.cancel, callback_data: "ai:create:cancel" }]
     ]
   };
 }
@@ -189,6 +222,52 @@ function formatUserName(user: {
   return `ID ${user.telegram_user_id}`;
 }
 
+interface AiAssigneeContext {
+  candidates: AiAssigneeCandidate[];
+  nameByUserId: Map<number, string>;
+  refByUserId: Map<number, string>;
+  userIdByRef: Map<string, number>;
+}
+
+function normalizeAiAssigneeAlias(value: string | null | undefined): string | null {
+  const normalized = value?.replace(/[\r\n\t]+/g, " ").trim().slice(0, 80) ?? "";
+
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function getAiAssigneeContext(env: Env, currentUserId: number): Promise<AiAssigneeContext> {
+  const users = await getActiveUsers(env);
+  const candidates: AiAssigneeCandidate[] = [];
+  const nameByUserId = new Map<number, string>();
+  const refByUserId = new Map<number, string>();
+  const userIdByRef = new Map<string, number>();
+  let memberNumber = 0;
+  let fallbackNumber = 0;
+
+  for (const user of users) {
+    fallbackNumber += 1;
+    const ref = user.id === currentUserId ? "self" : `member_${++memberNumber}`;
+    const fullName = normalizeAiAssigneeAlias([user.first_name, user.last_name].filter(Boolean).join(" "));
+    const username = normalizeAiAssigneeAlias(user.username);
+    const aliases = [
+      fullName,
+      normalizeAiAssigneeAlias(user.first_name),
+      normalizeAiAssigneeAlias(user.last_name),
+      username,
+      username ? `@${username}` : null
+    ].filter((alias): alias is string => alias !== null);
+    const uniqueAliases = Array.from(new Set(aliases));
+    const displayName = fullName ?? (username ? `@${username}` : `Family member ${fallbackNumber}`);
+
+    candidates.push({ ref, display_name: displayName, aliases: uniqueAliases });
+    nameByUserId.set(user.id, formatUserName(user));
+    refByUserId.set(user.id, ref);
+    userIdByRef.set(ref, user.id);
+  }
+
+  return { candidates, nameByUserId, refByUserId, userIdByRef };
+}
+
 function buildAdminUsersText(users: Awaited<ReturnType<typeof getAllUsers>>, labels: AppLabels): string {
   if (users.length === 0) {
     return labels.telegram.adminUsers.empty;
@@ -251,53 +330,33 @@ function buildTaskCardKeyboard(task: TelegramTaskListItem, isAdmin: boolean, lab
         callback_data: `task:miss:${task.id}`
       }
     ]);
-
-    const manageRow = [];
-
-    if (canEdit) {
-      manageRow.push({
-        text: labels.telegram.buttons.edit,
-        callback_data: `task:edit:${task.id}`
-      });
-    }
-
-    if (canDelete) {
-      manageRow.push({
-        text: labels.telegram.buttons.deleteTask,
-        callback_data: `task:delete:ask:${task.id}`
-      });
-    }
-
-    if (manageRow.length > 0) {
-      taskButtons.push(manageRow);
-    }
   } else if (canClose) {
-    const row = [
+    taskButtons.push([
       {
         text: labels.telegram.buttons.done,
         callback_data: `task:done:${task.id}`
       }
-    ];
-
-    if (canEdit) {
-      row.push({
-        text: labels.telegram.buttons.edit,
-        callback_data: `task:edit:${task.id}`
-      });
-    }
-
-    taskButtons.push(row);
-  } else if (canEdit) {
-    taskButtons.push([{ text: labels.telegram.buttons.edit, callback_data: `task:edit:${task.id}` }]);
+    ]);
   }
 
-  if (canDelete && task.status !== "overdue") {
-    taskButtons.push([
-      {
-        text: labels.telegram.buttons.deleteTask,
-        callback_data: `task:delete:ask:${task.id}`
-      }
-    ]);
+  const manageRow = [];
+
+  if (canEdit) {
+    manageRow.push({
+      text: labels.telegram.buttons.edit,
+      callback_data: `task:edit:${task.id}`
+    });
+  }
+
+  if (canDelete) {
+    manageRow.push({
+      text: labels.telegram.buttons.deleteTask,
+      callback_data: `task:delete:ask:${task.id}`
+    });
+  }
+
+  if (manageRow.length > 0) {
+    taskButtons.push(manageRow);
   }
 
   return {
@@ -349,7 +408,7 @@ function buildTaskCardText(task: TelegramTaskListItem, timezone: string, labels:
         ? labels.telegram.taskTypes.monthly
         : labels.telegram.taskTypes.fallback;
   const lines = [
-    `<b>${escapeHtml(task.title)}</b>`,
+    `<b>🎯 ${escapeHtml(task.title)}</b>`,
     "",
     `<i>${labels.telegram.fields.taskType}:</i> ${taskType}`,
     `<i>${labels.telegram.fields.status}:</i> ${status}`,
@@ -366,6 +425,32 @@ function buildTaskCardText(task: TelegramTaskListItem, timezone: string, labels:
 
   if (task.assignee_names) {
     lines.push(`<i>${labels.telegram.fields.assignees}:</i> ${escapeHtml(task.assignee_names)}`);
+  }
+
+  return lines.join("\n");
+}
+
+function buildAnnualEventCardText(event: TelegramAnnualEventListItem, labels: AppLabels): string {
+  const nextNotification = event.next_notification_at
+    ? formatDateTimeInTimeZone(event.next_notification_at, event.timezone)
+    : labels.annualEvents.noNextNotification;
+  const occurrenceYear = Number(event.upcoming_event_date.slice(0, 4));
+  const eventYearText = event.event_year && Number.isSafeInteger(occurrenceYear) && occurrenceYear >= event.event_year
+    ? labels.annualEvents.eventYearWithCount(event.event_year, occurrenceYear - event.event_year)
+    : event.event_year
+      ? String(event.event_year)
+      : null;
+  const lines = [
+    `<b>🎂 ${escapeHtml(event.title)}</b>`,
+    "",
+    `<i>${labels.annualEvents.dateLabel}:</i> ${formatAnnualEventDisplayDate(event.upcoming_event_date)}`,
+    eventYearText ? `<i>${labels.annualEvents.eventYear}:</i> ${escapeHtml(eventYearText)}` : null,
+    `<i>${labels.annualEvents.reminderTime}:</i> ${String(event.reminder_hour).padStart(2, "0")}:${String(event.reminder_minute).padStart(2, "0")} (${escapeHtml(event.timezone)})`,
+    `<i>${labels.annualEvents.nextNotification}:</i> ${nextNotification}`
+  ].filter((line): line is string => line !== null);
+
+  if (event.recipient_names) {
+    lines.push(`<i>${labels.annualEvents.recipients}:</i> ${escapeHtml(event.recipient_names)}`);
   }
 
   return lines.join("\n");
@@ -792,7 +877,7 @@ function parseOneTimeDateWindow(
   value: string,
   timezone: string
 ): { availableFrom: string; dueAt: string; display: string } | null {
-  const match = value.trim().match(/^(\d{2}-\d{2}-\d{4})\s*-\s*(\d{2}-\d{2}-\d{4})$/);
+  const match = value.trim().match(/^(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})\s*-\s*(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})$/);
 
   if (!match) {
     return null;
@@ -808,7 +893,7 @@ function parseOneTimeDateWindow(
   return {
     availableFrom: start.iso,
     dueAt: end.iso,
-    display: `${match[1]} - ${match[2]}`
+    display: `${formatDateInTimeZone(start.iso, timezone)} - ${formatDateInTimeZone(end.iso, timezone)}`
   };
 }
 
@@ -977,6 +1062,815 @@ function getAssigneeSummary(
   return labels.telegram.createPrompts.assigneeSummary.self;
 }
 
+function formatAiDraftDate(date: string | null, timezone: string): string {
+  if (date === null) {
+    return "-";
+  }
+
+  const parsed = parseLocalDateTime(`${date} 12:00`, timezone);
+
+  return parsed ? formatDateInTimeZone(parsed.iso, timezone) : date;
+}
+
+function formatAiDateStringFromIso(iso: string, timezone: string): string | null {
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatAiMissingFields(fields: AiTaskDraft["missing_fields"], labels: AppLabels): string {
+  return fields
+    .map((field) => labels.telegram.aiTaskDraft.missingFields[field] ?? field)
+    .join(", ");
+}
+
+function getAiMissingFields(data: AiCreateTaskSessionData): AiCreateTaskMissingField[] {
+  const fields: AiCreateTaskMissingField[] = [];
+  const taskType = data.taskType ?? "one_time";
+
+  if (!data.title?.trim()) {
+    fields.push("title");
+  }
+
+  if (taskType === "one_time" && !data.date) {
+    fields.push("date");
+  }
+
+  if (taskType === "one_time_window" && !data.startDate) {
+    fields.push("start_date");
+  }
+
+  if (taskType === "one_time_window" && !data.endDate) {
+    fields.push("end_date");
+  }
+
+  if (
+    !data.assigneeMode ||
+    (
+      data.assigneeMode === "selected" &&
+      (data.assigneeSelectionRequired || (data.assigneeUserIds?.length ?? 0) === 0)
+    )
+  ) {
+    fields.push("assignee_mode");
+  }
+
+  if (
+    (
+      (taskType === "one_time" && data.date) ||
+      (taskType === "one_time_window" && data.startDate && data.endDate)
+    ) &&
+    !data.reminderTime
+  ) {
+    fields.push("reminder_time");
+  }
+
+  return fields;
+}
+
+function getNextAiMissingField(data: AiCreateTaskSessionData): AiCreateTaskMissingField | null {
+  return getAiMissingFields(data)[0] ?? null;
+}
+
+function isAiAssigneeSelectionRequired(data: AiCreateTaskSessionData): boolean {
+  return data.assigneeMode === "selected" &&
+    (data.assigneeSelectionRequired === true || (data.assigneeUserIds?.length ?? 0) === 0);
+}
+
+function getAiClarificationPrompt(field: AiCreateTaskMissingField, labels: AppLabels): string {
+  if (field === "title") {
+    return labels.telegram.aiTaskDraft.prompts.title;
+  }
+
+  if (field === "date") {
+    return labels.telegram.aiTaskDraft.prompts.date;
+  }
+
+  if (field === "start_date") {
+    return labels.telegram.aiTaskDraft.prompts.windowStartDate;
+  }
+
+  if (field === "end_date") {
+    return labels.telegram.aiTaskDraft.prompts.windowEndDate;
+  }
+
+  if (field === "assignee_mode") {
+    return labels.telegram.aiTaskDraft.prompts.assignee;
+  }
+
+  return labels.telegram.aiTaskDraft.prompts.reminderTime;
+}
+
+function buildAiTaskDraftFlowText(
+  draftText: string,
+  dateIssue: AiTaskDraftDateIssue | null,
+  nextMissingField: AiCreateTaskMissingField | null,
+  needsAssigneeSelection: boolean,
+  labels: AppLabels
+): string {
+  const issueText = dateIssue === null
+    ? ""
+    : `${labels.telegram.aiTaskDraft.dateIssues[dateIssue]}\n\n`;
+
+  if (needsAssigneeSelection) {
+    return `${issueText}${draftText}\n\n${labels.telegram.aiTaskDraft.selectAssignees}`;
+  }
+
+  if (nextMissingField) {
+    return `${issueText}${draftText}\n\n${getAiClarificationPrompt(nextMissingField, labels)}`;
+  }
+
+  return `${issueText}${draftText}`;
+}
+
+function parseAiAssigneeAnswer(value: string): AiCreateTaskSessionData["assigneeMode"] | null {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+
+  if (
+    [
+      "all",
+      "everyone",
+      "everybody",
+      "for everyone",
+      "assign everyone",
+      "assign to everyone",
+      "всем",
+      "все",
+      "для всех",
+      "на всех",
+      "назначь всем",
+      "назначить всем"
+    ].includes(normalized)
+  ) {
+    return "all";
+  }
+
+  if (
+    [
+      "me",
+      "myself",
+      "only me",
+      "for me",
+      "assign me",
+      "assign to me",
+      "мне",
+      "меня",
+      "только мне",
+      "на меня",
+      "только на меня",
+      "назначь мне",
+      "назначить мне"
+    ].includes(normalized)
+  ) {
+    return "self";
+  }
+
+  return null;
+}
+
+function parseAiTimeUpdate(value: string): string | null {
+  const match = value.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+
+  if (!match) {
+    return null;
+  }
+
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function parseAiDateUpdate(value: string, timezone: string, now: string): string | null {
+  const match = value.match(/\b(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})\b/);
+
+  if (!match) {
+    return null;
+  }
+
+  const dueAt = parseLocalDateTime(`${match[1]} 23:59`, timezone);
+
+  if (!dueAt || Date.parse(dueAt.iso) <= Date.parse(now)) {
+    return null;
+  }
+
+  return formatAiDateStringFromIso(dueAt.iso, timezone);
+}
+
+function parseAiWindowUpdate(value: string, timezone: string, now: string): { startDate: string; endDate: string } | null {
+  const match = value.match(/\b(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})\s*-\s*(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})\b/);
+
+  if (!match) {
+    return null;
+  }
+
+  const window = parseOneTimeDateWindow(`${match[1]} - ${match[2]}`, timezone);
+
+  if (!window || Date.parse(window.dueAt) <= Date.parse(now)) {
+    return null;
+  }
+
+  const startDate = formatAiDateStringFromIso(window.availableFrom, timezone);
+  const endDate = formatAiDateStringFromIso(window.dueAt, timezone);
+
+  return startDate && endDate ? { startDate, endDate } : null;
+}
+
+function applyAiTaskDraftTextUpdate(
+  data: AiCreateTaskSessionData,
+  text: string,
+  timezone: string,
+  now: string
+): AiCreateTaskSessionData | null {
+  const assigneeMode = parseAiAssigneeAnswer(text);
+
+  if (assigneeMode) {
+    return {
+      ...data,
+      assigneeMode,
+      assigneeUserIds: undefined,
+      assigneeSelectionRequired: false
+    };
+  }
+
+  const reminderTime = parseAiTimeUpdate(text);
+
+  if (reminderTime) {
+    return { ...data, reminderTime };
+  }
+
+  const window = parseAiWindowUpdate(text, timezone, now);
+
+  if (window) {
+    return {
+      ...data,
+      taskType: "one_time_window",
+      date: undefined,
+      startDate: window.startDate,
+      endDate: window.endDate
+    };
+  }
+
+  const date = parseAiDateUpdate(text, timezone, now);
+
+  if (date) {
+    return {
+      ...data,
+      taskType: "one_time",
+      date,
+      startDate: undefined,
+      endDate: undefined
+    };
+  }
+
+  return null;
+}
+
+function buildAiTaskDraftFromSessionData(
+  data: AiCreateTaskSessionData,
+  assigneeContext: AiAssigneeContext
+): AiTaskDraft {
+  const taskType = data.taskType ?? "one_time";
+  const assigneeRefs = data.assigneeMode === "selected"
+    ? (data.assigneeUserIds ?? [])
+      .map((userId) => assigneeContext.refByUserId.get(userId))
+      .filter((ref): ref is string => ref !== undefined)
+    : [];
+  const assigneeSelectionRequired = data.assigneeMode === "selected"
+    ? data.assigneeSelectionRequired === true || assigneeRefs.length !== (data.assigneeUserIds?.length ?? 0)
+    : false;
+  const normalizedData: AiCreateTaskSessionData = {
+    ...data,
+    assigneeUserIds: data.assigneeMode === "selected"
+      ? assigneeRefs
+        .map((ref) => assigneeContext.userIdByRef.get(ref))
+        .filter((userId): userId is number => userId !== undefined)
+      : undefined,
+    assigneeSelectionRequired
+  };
+
+  return {
+    action: "create_task_draft",
+    task_type: taskType,
+    title: data.title?.trim() ? data.title.trim() : null,
+    assignee_mode: data.assigneeMode === "all"
+      ? "all"
+      : data.assigneeMode === "self"
+        ? "me"
+        : data.assigneeMode === "selected"
+          ? "selected"
+          : null,
+    assignee_refs: assigneeRefs,
+    assignee_selection_required: assigneeSelectionRequired,
+    date: taskType === "one_time" ? data.date ?? null : null,
+    start_date: taskType === "one_time_window" ? data.startDate ?? null : null,
+    end_date: taskType === "one_time_window" ? data.endDate ?? null : null,
+    reminder_time: data.reminderTime ?? null,
+    missing_fields: getAiMissingFields(normalizedData)
+  };
+}
+
+function formatAiTaskDraft(
+  draft: AiTaskDraft,
+  timezone: string,
+  labels: AppLabels,
+  assigneeContext: AiAssigneeContext
+): string {
+  const selectedAssigneeNames = draft.assignee_refs
+    .map((ref) => assigneeContext.userIdByRef.get(ref))
+    .map((userId) => userId === undefined ? null : assigneeContext.nameByUserId.get(userId) ?? null)
+    .filter((name): name is string => name !== null);
+  const assigneeText = draft.assignee_mode === null
+    ? "-"
+    : draft.assignee_mode === "all"
+      ? labels.telegram.aiTaskDraft.assigneeAll
+      : draft.assignee_mode === "selected"
+        ? selectedAssigneeNames.join(", ") || "-"
+        : labels.telegram.aiTaskDraft.assigneeSelf;
+  const missingFields = draft.missing_fields.length > 0
+    ? `\n${labels.telegram.aiTaskDraft.fields.missing}: ${formatAiMissingFields(draft.missing_fields, labels)}`
+    : "";
+
+  return [
+    labels.telegram.aiTaskDraft.title,
+    "",
+    `${labels.telegram.aiTaskDraft.fields.title}: ${draft.title ?? "-"}`,
+    `${labels.telegram.aiTaskDraft.fields.taskType}: ${
+      draft.task_type === "one_time_window"
+        ? labels.telegram.aiTaskDraft.taskTypeOneTimeWindow
+        : labels.telegram.aiTaskDraft.taskTypeOneTime
+    }`,
+    `${labels.telegram.aiTaskDraft.fields.assignees}: ${assigneeText}`,
+    draft.task_type === "one_time_window"
+      ? `${labels.telegram.aiTaskDraft.fields.window}: ${formatAiDraftDate(draft.start_date, timezone)} - ${formatAiDraftDate(draft.end_date, timezone)}`
+      : `${labels.telegram.aiTaskDraft.fields.date}: ${formatAiDraftDate(draft.date, timezone)}`,
+    `${labels.telegram.aiTaskDraft.fields.reminderTime}: ${draft.reminder_time ?? "-"}`,
+    missingFields
+  ].filter((line) => line.length > 0).join("\n");
+}
+
+function getAiCreateTaskSessionData(
+  draft: AiTaskDraft,
+  assigneeContext: AiAssigneeContext
+): AiCreateTaskSessionData {
+  const data: AiCreateTaskSessionData = {
+    taskType: draft.task_type === "one_time_window" ? "one_time_window" : "one_time"
+  };
+
+  if (draft.title !== null) {
+    data.title = draft.title;
+  }
+
+  if (draft.assignee_mode !== null) {
+    data.assigneeMode = draft.assignee_mode === "all"
+      ? "all"
+      : draft.assignee_mode === "selected"
+        ? "selected"
+        : "self";
+
+    if (draft.assignee_mode === "selected") {
+      data.assigneeUserIds = draft.assignee_refs
+        .map((ref) => assigneeContext.userIdByRef.get(ref))
+        .filter((userId): userId is number => userId !== undefined);
+      data.assigneeSelectionRequired = draft.assignee_selection_required ||
+        data.assigneeUserIds.length !== draft.assignee_refs.length ||
+        data.assigneeUserIds.length === 0;
+    }
+  }
+
+  if (draft.date !== null) {
+    data.date = draft.date;
+  }
+
+  if (draft.start_date !== null) {
+    data.startDate = draft.start_date;
+  }
+
+  if (draft.end_date !== null) {
+    data.endDate = draft.end_date;
+  }
+
+  if (draft.reminder_time !== null) {
+    data.reminderTime = draft.reminder_time;
+  }
+
+  return data;
+}
+
+async function openAiAssigneeSelection(
+  env: Env,
+  chatId: number,
+  userId: number,
+  now: string,
+  timezone: string,
+  labels: AppLabels,
+  data: AiCreateTaskSessionData,
+  messageId?: number
+): Promise<void> {
+  const activeUsers = await getActiveUsers(env);
+  const activeUserIds = new Set(activeUsers.map((user) => user.id));
+  const selectedUserIds = data.assigneeMode === "all"
+    ? activeUsers.map((user) => user.id)
+    : data.assigneeMode === "selected"
+      ? (data.assigneeUserIds ?? []).filter((selectedUserId) => activeUserIds.has(selectedUserId))
+      : activeUserIds.has(userId)
+        ? [userId]
+        : [];
+  const nextData: AiCreateTaskSessionData = {
+    ...data,
+    assigneeMode: "selected",
+    assigneeUserIds: selectedUserIds,
+    assigneeSelectionRequired: true
+  };
+  const assigneeContext = await getAiAssigneeContext(env, userId);
+  const draftText = formatAiTaskDraft(
+    buildAiTaskDraftFromSessionData(nextData, assigneeContext),
+    timezone,
+    labels,
+    assigneeContext
+  );
+
+  await updateUserSession(env, userId, AI_CREATE_TASK_SCENARIO, "assignee_selection", nextData, now);
+  await editCallbackMessageOrSendTracked(
+    env,
+    chatId,
+    userId,
+    now,
+    messageId,
+    `${draftText}\n\n${labels.telegram.aiTaskDraft.selectAssignees}`,
+    await buildAiSelectedAssigneesKeyboard(env, selectedUserIds, labels)
+  );
+}
+
+async function handleAiTaskDraftText(
+  env: Env,
+  chatId: number,
+  userId: number,
+  isAdmin: boolean,
+  now: string,
+  timezone: string,
+  labels: AppLabels,
+  text: string
+): Promise<boolean> {
+  if (env.AI_TASK_CREATION_ENABLED !== "true") {
+    return false;
+  }
+
+  try {
+    const assigneeContext = await getAiAssigneeContext(env, userId);
+    const result = await parseTaskDraftFromText(env, {
+      text,
+      now,
+      timezone,
+      assigneeCandidates: assigneeContext.candidates
+    });
+
+    if (result.draft.action === "none") {
+      await deleteStoredMessages(env, userId, ["create_flow"]);
+      await clearUserSession(env, userId, AI_CREATE_TASK_SCENARIO);
+      await sendTelegramMessage(env, chatId, labels.telegram.aiTaskDraft.notTask, getMainMenuKeyboard(isAdmin, labels));
+      return true;
+    }
+
+    const sessionData = getAiCreateTaskSessionData(result.draft, assigneeContext);
+    const needsAssigneeSelection = isAiAssigneeSelectionRequired(sessionData);
+    const nextMissingField = needsAssigneeSelection ? null : getNextAiMissingField(sessionData);
+    const draft = buildAiTaskDraftFromSessionData(sessionData, assigneeContext);
+    const draftText = formatAiTaskDraft(draft, timezone, labels, assigneeContext);
+    const nextStep = needsAssigneeSelection ? "assignee_selection" : nextMissingField ?? "confirm";
+
+    await deleteStoredMessages(env, userId, ["create_flow"]);
+    await clearUserSession(env, userId, AI_CREATE_TASK_SCENARIO);
+    await startAiCreateTaskSession(env, userId, sessionData, now, nextStep);
+
+    await sendTrackedCreateFlowMessage(
+      env,
+      chatId,
+      userId,
+      now,
+      buildAiTaskDraftFlowText(
+        draftText,
+        result.dateIssue,
+        nextMissingField,
+        needsAssigneeSelection,
+        labels
+      ),
+      needsAssigneeSelection
+        ? await buildAiSelectedAssigneesKeyboard(env, sessionData.assigneeUserIds ?? [], labels)
+        : nextMissingField
+          ? buildAiTaskDraftCancelKeyboard(labels)
+          : buildAiTaskDraftKeyboard(labels)
+    );
+
+    return true;
+  } catch (error) {
+    console.error("telegram_ai_task_draft_error", buildSafeAiTaskDraftErrorLog(env, "parse", error));
+    return false;
+  }
+}
+
+async function handleAiTaskDraftMergeText(
+  env: Env,
+  chatId: number,
+  userId: number,
+  now: string,
+  timezone: string,
+  labels: AppLabels,
+  currentData: AiCreateTaskSessionData,
+  text: string
+): Promise<boolean> {
+  if (env.AI_TASK_CREATION_ENABLED !== "true") {
+    return false;
+  }
+
+  try {
+    const assigneeContext = await getAiAssigneeContext(env, userId);
+    const result = await mergeTaskDraftWithText(env, {
+      currentDraft: buildAiTaskDraftFromSessionData(currentData, assigneeContext),
+      text,
+      now,
+      timezone,
+      assigneeCandidates: assigneeContext.candidates
+    });
+
+    if (result.draft.action === "none") {
+      return false;
+    }
+
+    const updatedData = getAiCreateTaskSessionData(result.draft, assigneeContext);
+    const needsAssigneeSelection = isAiAssigneeSelectionRequired(updatedData);
+    const nextMissingField = needsAssigneeSelection ? null : getNextAiMissingField(updatedData);
+    const draft = buildAiTaskDraftFromSessionData(updatedData, assigneeContext);
+    const draftText = formatAiTaskDraft(draft, timezone, labels, assigneeContext);
+    const nextStep = needsAssigneeSelection ? "assignee_selection" : nextMissingField ?? "confirm";
+
+    await updateUserSession(env, userId, AI_CREATE_TASK_SCENARIO, nextStep, updatedData, now);
+    await sendTrackedCreateFlowMessage(
+      env,
+      chatId,
+      userId,
+      now,
+      buildAiTaskDraftFlowText(
+        draftText,
+        result.dateIssue,
+        nextMissingField,
+        needsAssigneeSelection,
+        labels
+      ),
+      needsAssigneeSelection
+        ? await buildAiSelectedAssigneesKeyboard(env, updatedData.assigneeUserIds ?? [], labels)
+        : nextMissingField
+          ? buildAiTaskDraftCancelKeyboard(labels)
+          : buildAiTaskDraftKeyboard(labels)
+    );
+
+    return true;
+  } catch (error) {
+    console.error("telegram_ai_task_draft_merge_error", buildSafeAiTaskDraftErrorLog(env, "merge", error));
+    return false;
+  }
+}
+
+async function handleAiTaskDraftClarification(
+  env: Env,
+  chatId: number,
+  userId: number,
+  isAdmin: boolean,
+  now: string,
+  timezone: string,
+  labels: AppLabels,
+  session: UserSession,
+  text: string,
+  messageId: number | null
+): Promise<void> {
+  if (session.scenario !== AI_CREATE_TASK_SCENARIO) {
+    await sendTelegramMessage(env, chatId, labels.telegram.createPrompts.useMenuOrStart, getMainMenuKeyboard(isAdmin, labels));
+    return;
+  }
+
+  if (messageId !== null) {
+    await recordTelegramMessageRef(env, userId, chatId, messageId, "create_flow", now);
+  }
+
+  const data = getSessionData<AiCreateTaskSessionData>(session);
+  const assigneeContext = await getAiAssigneeContext(env, userId);
+  const field = getNextAiMissingField(data);
+
+  if (!field) {
+    const updatedData = applyAiTaskDraftTextUpdate(data, text, timezone, now);
+
+    if (!updatedData) {
+      const handledByAiMerge = await handleAiTaskDraftMergeText(
+        env,
+        chatId,
+        userId,
+        now,
+        timezone,
+        labels,
+        data,
+        text
+      );
+
+      if (handledByAiMerge) {
+        return;
+      }
+
+      if (isAiAssigneeEditIntent(text)) {
+        await openAiAssigneeSelection(
+          env,
+          chatId,
+          userId,
+          now,
+          timezone,
+          labels,
+          data
+        );
+        return;
+      }
+
+      const handledByAi = await handleAiTaskDraftText(env, chatId, userId, isAdmin, now, timezone, labels, text);
+
+      if (!handledByAi) {
+        await sendTelegramMessage(env, chatId, labels.telegram.createPrompts.useMenuOrStart, getMainMenuKeyboard(isAdmin, labels));
+      }
+
+      return;
+    }
+
+    await updateUserSession(env, userId, AI_CREATE_TASK_SCENARIO, "confirm", updatedData, now);
+    await sendTrackedCreateFlowMessage(
+      env,
+      chatId,
+      userId,
+      now,
+      formatAiTaskDraft(
+        buildAiTaskDraftFromSessionData(updatedData, assigneeContext),
+        timezone,
+        labels,
+        assigneeContext
+      ),
+      buildAiTaskDraftKeyboard(labels)
+    );
+    return;
+  }
+
+  let nextData: AiCreateTaskSessionData | null = null;
+  let invalidMessage: string | null = null;
+
+  if (field === "title") {
+    const title = text.trim();
+
+    if (title.length < 1 || title.length > 120) {
+      invalidMessage = labels.telegram.createPrompts.invalidTitle;
+    } else {
+      nextData = { ...data, title };
+    }
+  } else if (field === "date") {
+    const dueAt = parseLocalDateTime(`${text.trim()} 23:59`, timezone);
+
+    if (!dueAt) {
+      invalidMessage = labels.telegram.createPrompts.invalidDueDate;
+    } else if (Date.parse(dueAt.iso) <= Date.parse(now)) {
+      invalidMessage = labels.telegram.createPrompts.dueDateFuture;
+    } else {
+      const date = formatAiDateStringFromIso(dueAt.iso, timezone);
+      nextData = date ? { ...data, date, reminderTime: data.reminderTime ?? "09:00" } : null;
+      invalidMessage = date ? null : labels.telegram.createPrompts.invalidDueDate;
+    }
+  } else if (field === "start_date") {
+    const startAt = parseLocalDateTime(`${text.trim()} 00:00`, timezone);
+
+    if (!startAt) {
+      invalidMessage = labels.telegram.createPrompts.invalidDueDate;
+    } else if (data.endDate) {
+      const endAt = parseLocalDateTime(`${data.endDate} 23:59`, timezone);
+      const startDate = formatAiDateStringFromIso(startAt.iso, timezone);
+
+      if (!endAt || Date.parse(startAt.iso) > Date.parse(endAt.iso)) {
+        invalidMessage = labels.telegram.createPrompts.invalidOneTimeWindow;
+      } else {
+        nextData = startDate ? { ...data, taskType: "one_time_window", startDate, reminderTime: data.reminderTime ?? "09:00" } : null;
+        invalidMessage = startDate ? null : labels.telegram.createPrompts.invalidDueDate;
+      }
+    } else {
+      const startDate = formatAiDateStringFromIso(startAt.iso, timezone);
+      nextData = startDate ? { ...data, taskType: "one_time_window", startDate, reminderTime: data.reminderTime ?? "09:00" } : null;
+      invalidMessage = startDate ? null : labels.telegram.createPrompts.invalidDueDate;
+    }
+  } else if (field === "end_date") {
+    const endAt = parseLocalDateTime(`${text.trim()} 23:59`, timezone);
+
+    if (!endAt) {
+      invalidMessage = labels.telegram.createPrompts.invalidDueDate;
+    } else if (Date.parse(endAt.iso) <= Date.parse(now)) {
+      invalidMessage = labels.telegram.createPrompts.oneTimeWindowEndFuture;
+    } else if (data.startDate) {
+      const startAt = parseLocalDateTime(`${data.startDate} 00:00`, timezone);
+      const endDate = formatAiDateStringFromIso(endAt.iso, timezone);
+
+      if (!startAt || Date.parse(startAt.iso) > Date.parse(endAt.iso)) {
+        invalidMessage = labels.telegram.createPrompts.invalidOneTimeWindow;
+      } else {
+        nextData = endDate ? { ...data, taskType: "one_time_window", endDate, reminderTime: data.reminderTime ?? "09:00" } : null;
+        invalidMessage = endDate ? null : labels.telegram.createPrompts.invalidDueDate;
+      }
+    } else {
+      const endDate = formatAiDateStringFromIso(endAt.iso, timezone);
+      nextData = endDate ? { ...data, taskType: "one_time_window", endDate, reminderTime: data.reminderTime ?? "09:00" } : null;
+      invalidMessage = endDate ? null : labels.telegram.createPrompts.invalidDueDate;
+    }
+  } else if (field === "reminder_time") {
+    const reminderTimeText = parseAiTimeUpdate(text);
+    const reminderTime = reminderTimeText ? parseLocalTime(reminderTimeText) : null;
+
+    if (!reminderTime) {
+      invalidMessage = labels.telegram.createPrompts.invalidTime;
+    } else {
+      nextData = { ...data, reminderTime: reminderTime.display };
+    }
+  } else {
+    const assigneeMode = parseAiAssigneeAnswer(text);
+
+    if (!assigneeMode) {
+      invalidMessage = labels.telegram.aiTaskDraft.invalidAssignee;
+    } else {
+      nextData = {
+        ...data,
+        assigneeMode,
+        assigneeUserIds: undefined,
+        assigneeSelectionRequired: false
+      };
+    }
+  }
+
+  if (!nextData) {
+    if (session.step === "assignee_selection" && data.assigneeMode === "selected") {
+      const draftText = formatAiTaskDraft(
+        buildAiTaskDraftFromSessionData(data, assigneeContext),
+        timezone,
+        labels,
+        assigneeContext
+      );
+
+      await sendTrackedCreateFlowMessage(
+        env,
+        chatId,
+        userId,
+        now,
+        `${invalidMessage ?? labels.telegram.aiTaskDraft.invalidAssignee}\n\n${draftText}\n\n${labels.telegram.aiTaskDraft.selectAssignees}`,
+        await buildAiSelectedAssigneesKeyboard(env, data.assigneeUserIds ?? [], labels)
+      );
+      return;
+    }
+
+    await sendTrackedCreateFlowMessage(
+      env,
+      chatId,
+      userId,
+      now,
+      `${invalidMessage ?? labels.telegram.aiTaskDraft.createFailed}\n\n${getAiClarificationPrompt(field, labels)}`,
+      buildAiTaskDraftCancelKeyboard(labels)
+    );
+    return;
+  }
+
+  const nextField = getNextAiMissingField(nextData);
+  const nextDraftText = formatAiTaskDraft(
+    buildAiTaskDraftFromSessionData(nextData, assigneeContext),
+    timezone,
+    labels,
+    assigneeContext
+  );
+
+  await updateUserSession(env, userId, AI_CREATE_TASK_SCENARIO, nextField ?? "confirm", nextData, now);
+  await sendTrackedCreateFlowMessage(
+    env,
+    chatId,
+    userId,
+    now,
+    nextField ? `${nextDraftText}\n\n${getAiClarificationPrompt(nextField, labels)}` : nextDraftText,
+    nextField ? buildAiTaskDraftCancelKeyboard(labels) : buildAiTaskDraftKeyboard(labels)
+  );
+}
+
 async function buildSelectedAssigneesKeyboard(
   env: Env,
   selectedUserIds: number[],
@@ -996,6 +1890,29 @@ async function buildSelectedAssigneesKeyboard(
       ...userButtons,
       [{ text: labels.telegram.buttons.doneSelection, callback_data: "task:create:assignees:done" }],
       [{ text: labels.telegram.buttons.cancel, callback_data: "task:create:cancel" }]
+    ]
+  };
+}
+
+async function buildAiSelectedAssigneesKeyboard(
+  env: Env,
+  selectedUserIds: number[],
+  labels: AppLabels
+): Promise<InlineKeyboardMarkup> {
+  const selected = new Set(selectedUserIds);
+  const users = await getActiveUsers(env);
+  const userButtons = users.map((user) => [
+    {
+      text: `${selected.has(user.id) ? "✓ " : ""}${formatUserName(user)}`,
+      callback_data: `ai:create:assignee_toggle:${user.id}`
+    }
+  ]);
+
+  return {
+    inline_keyboard: [
+      ...userButtons,
+      [{ text: labels.telegram.buttons.doneSelection, callback_data: "ai:create:assignees:done" }],
+      [{ text: labels.telegram.buttons.cancel, callback_data: "ai:create:cancel" }]
     ]
   };
 }
@@ -1077,7 +1994,8 @@ async function sendTaskList(
   now: string,
   title: string,
   tasks: TelegramTaskListItem[],
-  emptyText: string
+  emptyText: string,
+  annualEvents: TelegramAnnualEventListItem[] = []
 ): Promise<void> {
   await deleteStoredMessages(env, userId, ["task_list", "create_flow"]);
 
@@ -1091,7 +2009,7 @@ async function sendTaskList(
     { parseMode: "HTML" }
   );
 
-  if (tasks.length === 0) {
+  if (tasks.length === 0 && annualEvents.length === 0) {
     await sendTrackedTaskListMessage(env, chatId, userId, now, emptyText, undefined, { parseMode: "HTML" });
     await sendTrackedTaskListMessage(env, chatId, userId, now, labels.telegram.messages.menuTitle, getMainMenuKeyboard(isAdmin, labels));
     return;
@@ -1109,11 +2027,36 @@ async function sendTaskList(
     );
   }
 
+  if (annualEvents.length > 0) {
+    await sendTrackedTaskListMessage(
+      env,
+      chatId,
+      userId,
+      now,
+      `<b>🎂 ${labels.annualEvents.title.toUpperCase()}</b>`,
+      undefined,
+      { parseMode: "HTML" }
+    );
+
+    for (const event of annualEvents) {
+      await sendTrackedTaskListMessage(
+        env,
+        chatId,
+        userId,
+        now,
+        buildAnnualEventCardText(event, labels),
+        undefined,
+        { parseMode: "HTML" }
+      );
+    }
+  }
+
   await sendTrackedTaskListMessage(env, chatId, userId, now, labels.telegram.messages.menuTitle, getMainMenuKeyboard(isAdmin, labels));
 }
 
 async function sendMyTasks(env: Env, chatId: number, userId: number, isAdmin: boolean, labels: AppLabels, timezone: string, now: string): Promise<void> {
   const tasks = await getActiveTasksForUser(env, userId);
+  const annualEvents = await getUpcomingAnnualEventsForUser(env, userId, now);
 
   await sendTaskList(
     env,
@@ -1125,7 +2068,8 @@ async function sendMyTasks(env: Env, chatId: number, userId: number, isAdmin: bo
     now,
     labels.telegram.menu.myTasks,
     tasks,
-    labels.telegram.messages.emptyMyTasks
+    labels.telegram.messages.emptyMyTasks,
+    annualEvents
   );
 }
 
@@ -2230,6 +3174,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
   const activeSession = await getActiveUserSession(env, storedUser.id, now);
 
   if (text === "/start") {
+    await clearUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO);
     await clearUserSession(env, storedUser.id, CREATE_ONE_TIME_TASK_SCENARIO);
     await clearUserSession(env, storedUser.id, ADMIN_ADD_USER_SCENARIO);
     await clearUserSession(env, storedUser.id, EDIT_TASK_SCENARIO);
@@ -2242,11 +3187,13 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     );
   } else if (callbackData === "tasks:mine") {
     await answerCallbackQuery(env, update.callback_query?.id ?? "");
+    await clearUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO);
     await clearUserSession(env, storedUser.id, CREATE_ONE_TIME_TASK_SCENARIO);
     await clearUserSession(env, storedUser.id, EDIT_TASK_SCENARIO);
     await sendMyTasks(env, context.chat.id, storedUser.id, storedUser.is_admin === 1, labels, storedUser.timezone, now);
   } else if (callbackData === "tasks:family") {
     await answerCallbackQuery(env, update.callback_query?.id ?? "");
+    await clearUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO);
     await clearUserSession(env, storedUser.id, CREATE_ONE_TIME_TASK_SCENARIO);
     await clearUserSession(env, storedUser.id, EDIT_TASK_SCENARIO);
     await sendFamilyTasks(env, context.chat.id, storedUser.id, storedUser.is_admin === 1, labels, storedUser.timezone, now);
@@ -2264,6 +3211,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     if (storedUser.is_admin !== 1) {
       await sendTelegramMessage(env, context.chat.id, labels.telegram.adminUsers.adminOnly, getMainMenuKeyboard(storedUser.is_admin === 1, labels));
     } else {
+      await clearUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO);
       await clearUserSession(env, storedUser.id, CREATE_ONE_TIME_TASK_SCENARIO);
       await clearUserSession(env, storedUser.id, EDIT_TASK_SCENARIO);
       await startAdminAddUserSession(env, storedUser.id, now);
@@ -3658,9 +4606,208 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     await clearUserSession(env, storedUser.id, CREATE_ONE_TIME_TASK_SCENARIO);
     await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
     await sendTelegramMessage(env, context.chat.id, labels.telegram.createPrompts.cancelled, getMainMenuKeyboard(storedUser.is_admin === 1, labels));
+  } else if (callbackData === "ai:create:assignees:edit") {
+    await answerCallbackQuery(env, update.callback_query?.id ?? "");
+
+    if (!activeSession || activeSession.scenario !== AI_CREATE_TASK_SCENARIO || activeSession.step !== "confirm") {
+      await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
+      await sendTelegramMessage(env, context.chat.id, labels.telegram.aiTaskDraft.expired, getMainMenuKeyboard(storedUser.is_admin === 1, labels));
+    } else {
+      const data = getSessionData<AiCreateTaskSessionData>(activeSession);
+      await openAiAssigneeSelection(
+        env,
+        context.chat.id,
+        storedUser.id,
+        now,
+        storedUser.timezone,
+        labels,
+        data,
+        update.callback_query?.message?.message_id
+      );
+    }
+  } else if (callbackData?.startsWith("ai:create:assignee_toggle:")) {
+    await answerCallbackQuery(env, update.callback_query?.id ?? "");
+
+    if (!activeSession || activeSession.scenario !== AI_CREATE_TASK_SCENARIO || activeSession.step !== "assignee_selection") {
+      await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
+      await sendTelegramMessage(env, context.chat.id, labels.telegram.aiTaskDraft.expired, getMainMenuKeyboard(storedUser.is_admin === 1, labels));
+    } else {
+      const userIdToToggle = Number(callbackData.slice("ai:create:assignee_toggle:".length));
+      const data = getSessionData<AiCreateTaskSessionData>(activeSession);
+      const activeUsers = await getActiveUsers(env);
+      const activeUserIds = new Set(activeUsers.map((user) => user.id));
+      const selected = new Set((data.assigneeUserIds ?? []).filter((userId) => activeUserIds.has(userId)));
+
+      if (Number.isSafeInteger(userIdToToggle) && userIdToToggle > 0) {
+        if (selected.has(userIdToToggle)) {
+          selected.delete(userIdToToggle);
+        } else if (activeUserIds.has(userIdToToggle)) {
+          selected.add(userIdToToggle);
+        }
+      }
+
+      const selectedUserIds = Array.from(selected);
+      const nextData: AiCreateTaskSessionData = {
+        ...data,
+        assigneeMode: "selected",
+        assigneeUserIds: selectedUserIds,
+        assigneeSelectionRequired: true
+      };
+      const assigneeContext = await getAiAssigneeContext(env, storedUser.id);
+      const draftText = formatAiTaskDraft(
+        buildAiTaskDraftFromSessionData(nextData, assigneeContext),
+        storedUser.timezone,
+        labels,
+        assigneeContext
+      );
+
+      await updateUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO, "assignee_selection", nextData, now);
+      await editCallbackMessageOrSendTracked(
+        env,
+        context.chat.id,
+        storedUser.id,
+        now,
+        update.callback_query?.message?.message_id,
+        `${draftText}\n\n${labels.telegram.aiTaskDraft.selectAssignees}`,
+        await buildAiSelectedAssigneesKeyboard(env, selectedUserIds, labels)
+      );
+    }
+  } else if (callbackData === "ai:create:assignees:done") {
+    await answerCallbackQuery(env, update.callback_query?.id ?? "");
+
+    if (!activeSession || activeSession.scenario !== AI_CREATE_TASK_SCENARIO || activeSession.step !== "assignee_selection") {
+      await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
+      await sendTelegramMessage(env, context.chat.id, labels.telegram.aiTaskDraft.expired, getMainMenuKeyboard(storedUser.is_admin === 1, labels));
+    } else {
+      const data = getSessionData<AiCreateTaskSessionData>(activeSession);
+      const assigneeUserIds = await resolveAssigneeUserIds(env, storedUser.id, "selected", data.assigneeUserIds);
+
+      if (assigneeUserIds.length === 0) {
+        await editCallbackMessageOrSendTracked(
+          env,
+          context.chat.id,
+          storedUser.id,
+          now,
+          update.callback_query?.message?.message_id,
+          labels.telegram.createPrompts.selectAtLeastOneAssignee,
+          await buildAiSelectedAssigneesKeyboard(env, data.assigneeUserIds ?? [], labels)
+        );
+      } else {
+        const nextData: AiCreateTaskSessionData = {
+          ...data,
+          assigneeMode: "selected",
+          assigneeUserIds,
+          assigneeSelectionRequired: false
+        };
+        const nextField = getNextAiMissingField(nextData);
+        const assigneeContext = await getAiAssigneeContext(env, storedUser.id);
+        const draftText = formatAiTaskDraft(
+          buildAiTaskDraftFromSessionData(nextData, assigneeContext),
+          storedUser.timezone,
+          labels,
+          assigneeContext
+        );
+
+        await updateUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO, nextField ?? "confirm", nextData, now);
+        await editCallbackMessageOrSendTracked(
+          env,
+          context.chat.id,
+          storedUser.id,
+          now,
+          update.callback_query?.message?.message_id,
+          nextField ? `${draftText}\n\n${getAiClarificationPrompt(nextField, labels)}` : draftText,
+          nextField ? buildAiTaskDraftCancelKeyboard(labels) : buildAiTaskDraftKeyboard(labels)
+        );
+      }
+    }
+  } else if (callbackData === "ai:create:cancel") {
+    await answerCallbackQuery(env, update.callback_query?.id ?? "");
+    await clearUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO);
+    await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
+    await sendTelegramMessage(env, context.chat.id, labels.telegram.aiTaskDraft.cancelled, getMainMenuKeyboard(storedUser.is_admin === 1, labels));
+  } else if (callbackData === "ai:create:confirm") {
+    await answerCallbackQuery(env, update.callback_query?.id ?? "");
+
+    if (!activeSession || activeSession.scenario !== AI_CREATE_TASK_SCENARIO || activeSession.step !== "confirm") {
+      await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
+      await sendTelegramMessage(env, context.chat.id, labels.telegram.aiTaskDraft.expired, getMainMenuKeyboard(storedUser.is_admin === 1, labels));
+    } else {
+      const data = getSessionData<AiCreateTaskSessionData>(activeSession);
+      const title = data.title?.trim() ?? "";
+      const taskType = data.taskType ?? "one_time";
+      const dueAt = taskType === "one_time" && data.date
+        ? parseLocalDateTime(`${data.date} 23:59`, storedUser.timezone)
+        : taskType === "one_time_window" && data.endDate
+          ? parseLocalDateTime(`${data.endDate} 23:59`, storedUser.timezone)
+          : null;
+      const availableFrom = taskType === "one_time_window" && data.startDate
+        ? parseLocalDateTime(`${data.startDate} 00:00`, storedUser.timezone)
+        : null;
+      const reminderTime = data.reminderTime ? parseLocalTime(data.reminderTime) : null;
+
+      if (
+        !title ||
+        !dueAt ||
+        !reminderTime ||
+        (taskType === "one_time_window" && (!availableFrom || Date.parse(availableFrom.iso) > Date.parse(dueAt.iso))) ||
+        Date.parse(dueAt.iso) <= Date.parse(now)
+      ) {
+        await clearUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO);
+        await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
+        await sendTelegramMessage(env, context.chat.id, labels.telegram.aiTaskDraft.createFailed, getMainMenuKeyboard(storedUser.is_admin === 1, labels));
+      } else {
+        const assigneeUserIds = await resolveAssigneeUserIds(
+          env,
+          storedUser.id,
+          data.assigneeMode,
+          data.assigneeUserIds
+        );
+
+        if (assigneeUserIds.length === 0) {
+          await clearUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO);
+          await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
+          await sendTelegramMessage(env, context.chat.id, labels.telegram.createPrompts.selectedAssigneesUnavailable, getMainMenuKeyboard(storedUser.is_admin === 1, labels));
+        } else {
+          const taskId = await createOneTimeTask(env, {
+            userId: storedUser.id,
+            assigneeUserIds,
+            title,
+            ...(taskType === "one_time_window" && availableFrom ? { availableFrom: availableFrom.iso } : {}),
+            dueAt: dueAt.iso,
+            reminderHour: reminderTime.hour,
+            reminderMinute: reminderTime.minute,
+            timezone: storedUser.timezone,
+            now
+          });
+
+          await recordTelegramTaskCreated(env, storedUser.id, taskId, taskType, assigneeUserIds.length, now);
+          await clearUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO);
+          await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
+          await sendTelegramMessage(
+            env,
+            context.chat.id,
+            taskType === "one_time_window" && availableFrom
+              ? labels.telegram.createPrompts.createdOneTimeWindow(
+                title,
+                getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels),
+                `${formatDateInTimeZone(availableFrom.iso, storedUser.timezone)} - ${formatDateInTimeZone(dueAt.iso, storedUser.timezone)}`,
+                reminderTime.display
+              )
+              : labels.telegram.createPrompts.createdOneTime(
+                title,
+                getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels),
+                formatDateInTimeZone(dueAt.iso, storedUser.timezone),
+                reminderTime.display
+              ),
+            getMainMenuKeyboard(storedUser.is_admin === 1, labels)
+          );
+        }
+      }
+    }
   } else if (callbackData === "task:create") {
     await answerCallbackQuery(env, update.callback_query?.id ?? "");
     await deleteStoredMessages(env, storedUser.id, ["create_flow"]);
+    await clearUserSession(env, storedUser.id, AI_CREATE_TASK_SCENARIO);
     await clearUserSession(env, storedUser.id, EDIT_TASK_SCENARIO);
     await startCreateTaskSession(env, storedUser.id, now);
     await sendTrackedCreateFlowMessage(
@@ -3700,6 +4847,19 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
       text,
       update.message?.message_id ?? null
     );
+  } else if (text !== null && activeSession?.scenario === AI_CREATE_TASK_SCENARIO) {
+    await handleAiTaskDraftClarification(
+      env,
+      context.chat.id,
+      storedUser.id,
+      storedUser.is_admin === 1,
+      now,
+      storedUser.timezone,
+      labels,
+      activeSession,
+      text,
+      update.message?.message_id ?? null
+    );
   } else if (text !== null && activeSession) {
     await handleCreateTaskSession(
       env,
@@ -3714,12 +4874,25 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
       update.message?.message_id ?? null
     );
   } else if (text !== null) {
-    await sendTelegramMessage(
+    const handledByAi = await handleAiTaskDraftText(
       env,
       context.chat.id,
-      labels.telegram.createPrompts.useMenuOrStart,
-      getMainMenuKeyboard(storedUser.is_admin === 1, labels)
+      storedUser.id,
+      storedUser.is_admin === 1,
+      now,
+      storedUser.timezone,
+      labels,
+      text
     );
+
+    if (!handledByAi) {
+      await sendTelegramMessage(
+        env,
+        context.chat.id,
+        labels.telegram.createPrompts.useMenuOrStart,
+        getMainMenuKeyboard(storedUser.is_admin === 1, labels)
+      );
+    }
   }
 
   return jsonResponse({

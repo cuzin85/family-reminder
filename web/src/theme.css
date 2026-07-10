@@ -17,7 +17,7 @@
   --success-soft: #def6e8;
   --danger: #b8323a;
   --shadow: 0 18px 50px rgba(23, 32, 38, 0.12);
-  --sticky-task-tabs-top: 56px;
+  --sticky-task-tabs-top: 48px;
 }
 
 * {
@@ -469,6 +469,16 @@ a {
   width: auto;
 }
 
+.tab--settings .tab__icon {
+  display: none;
+}
+
+.tab--settings {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
 .tab {
   background: transparent;
   border: 1px solid transparent;
@@ -577,6 +587,42 @@ a {
   overflow-wrap: anywhere;
 }
 
+.task-card__title {
+  align-items: flex-start;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.task-card__title-icon {
+  flex: 0 0 18px;
+  height: 18px;
+  margin-top: 3px;
+  width: 18px;
+}
+
+.task-card__title-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.annual-event-create {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.annual-event-create h3 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.annual-event-create .field-grid .field:last-child {
+  grid-column: auto;
+}
+
 .task-card__audit-button {
   align-items: center;
   background: var(--surface-muted);
@@ -671,6 +717,19 @@ a {
 
 .field-grid .field:last-child {
   grid-column: 1 / -1;
+}
+
+.field-grid--annual-event .field {
+  min-width: 0;
+}
+
+.field-grid--annual-event .field:last-child {
+  grid-column: auto;
+}
+
+.field-grid--annual-event .select {
+  min-width: 0;
+  width: 100%;
 }
 
 .field span,
@@ -1029,7 +1088,11 @@ a {
 
   .tabs--sections {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tabs--sections-admin {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .tabs--sections .tab {
@@ -1100,6 +1163,10 @@ a {
     grid-template-columns: 1fr;
   }
 
+  .field-grid--annual-event {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .user-list-row {
     grid-template-columns: 1fr;
   }
@@ -1136,6 +1203,24 @@ a {
 }
 
 @media (max-width: 460px) {
+  .tabs--sections-admin {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) 42px;
+  }
+
+  .tab--settings .tab__icon {
+    display: block;
+  }
+
+  .tab--settings .tab__label {
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+
   .panel {
     gap: 16px;
     padding: 16px;

@@ -7,6 +7,7 @@ This document describes the web interface architecture for Family Reminder.
 Telegram remains the main notification channel. The web app exists for workflows that are awkward in Telegram:
 
 - creating and editing complex tasks;
+- creating and managing annual events;
 - reviewing task history;
 - filtering and paginating history;
 - managing users;
@@ -112,6 +113,9 @@ General rules:
 - admins can manage users;
 - admins can act on more tasks than ordinary users;
 - admin-only endpoints must check `users.is_admin`.
+- ordinary users can manage annual events when they are a recipient or the creator;
+- admins can manage every active annual event;
+- other active household users can view family events without modifying them.
 
 The frontend can hide unavailable actions, but backend checks are authoritative.
 
@@ -141,6 +145,19 @@ The tasks screen contains:
 - task actions;
 - create task flow;
 - edit task modal.
+- upcoming assigned annual events mixed into the personal timeline by date.
+
+The family task list contains tasks only. The complete household event list is available in the Events screen.
+
+### Events
+
+The events screen contains:
+
+- `My events` and `All events` tabs;
+- annual event creation and editing modal;
+- recipient selection;
+- pagination in groups of ten cards;
+- event year, next occurrence, and next notification details.
 
 ### History
 
@@ -181,6 +198,14 @@ The web UI supports:
 - monthly fixed-day task;
 - monthly last-days task;
 - monthly end-plus-start window task.
+
+Annual-event forms support:
+
+- title;
+- month and day;
+- optional original event year;
+- notification time;
+- one or more recipients.
 
 Native browser date/time inputs are used for one-time task date selection.
 

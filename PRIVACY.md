@@ -18,6 +18,8 @@ The app may store:
 - task schedules and recurrence rules;
 - task assignees;
 - task status and completion history;
+- annual event titles, dates, optional original years, and recipients;
+- annual-event notification delivery logs;
 - Telegram notification delivery logs;
 - Telegram message IDs for best-effort cleanup;
 - web sessions;
@@ -32,6 +34,8 @@ Secrets are stored in Cloudflare Worker Secrets.
 
 Telegram messages are processed through Telegram Bot API.
 
+If `AI_TASK_CREATION_ENABLED=true`, free-form task text and active household members' display names/aliases are processed by Cloudflare Workers AI in the deployer's Cloudflare account. The application uses temporary member references and does not intentionally send Telegram IDs, D1 IDs, bot tokens, or session secrets to the model.
+
 ## Data Not Intended To Be Stored
 
 The app should not store:
@@ -41,6 +45,7 @@ The app should not store:
 - plaintext web session secret;
 - user passwords;
 - payment data.
+- full AI prompts or model responses in D1.
 
 ## Data Exports
 
@@ -54,7 +59,7 @@ Do not commit exports to Git.
 
 The maintenance UI can clean old technical logs such as notification logs and Telegram message references.
 
-Task history, users, rules, assignments, and audit logs should not be deleted automatically without an explicit product decision.
+Task history, users, rules, assignments, annual events, recipients, and audit logs should not be deleted automatically without an explicit product decision.
 
 ## User Access
 

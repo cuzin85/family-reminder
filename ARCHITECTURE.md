@@ -41,6 +41,8 @@ Cloudflare D1
 
 The application does not require a VPS, a long-running process, or Telegram long polling.
 
+When optional AI task creation is enabled, the bot Worker calls Cloudflare Workers AI to turn free-form Telegram text into a structured draft. The application validates that draft and asks for confirmation before writing a task to D1.
+
 ## Cloudflare Workers
 
 The deployment uses two Workers.
@@ -53,6 +55,7 @@ The bot Worker handles:
 - Telegram commands and callback queries;
 - access checks;
 - guided Telegram flows;
+- optional AI-assisted one-time task drafts;
 - task actions from Telegram;
 - scheduled reminder processing;
 - Telegram notification delivery.
@@ -86,6 +89,8 @@ It stores:
 - audit logs;
 - Telegram message references;
 - web sessions.
+- annual events and recipients;
+- annual-event notification logs.
 
 The bot Worker and web Worker should use the same production D1 database so both interfaces see the same tasks, users, and history.
 
@@ -108,6 +113,8 @@ Reminder processing:
 5. Update `next_remind_at`.
 6. Create future recurring task instances when needed.
 7. Close old unfinished recurring instances as missed when a new period starts.
+8. Find due annual-event notifications and send them to event recipients.
+9. Record annual-event delivery attempts and calculate the next notification.
 
 Cron runs in UTC. Application dates are stored in UTC. User-facing task times are displayed in the timezone stored on the task rule.
 
@@ -122,6 +129,20 @@ Telegram is used for:
 - handling callback actions.
 
 Long polling is not used.
+
+## Cloudflare Workers AI
+
+Workers AI is optional and used only by the bot Worker for free-form task drafting.
+
+Configuration:
+
+- `AI_TASK_CREATION_ENABLED` controls whether the flow is available;
+- `AI_TASK_CREATION_MODEL` selects the model;
+- the `AI` binding provides model access.
+
+The model receives the user's task text plus temporary references and display names/aliases for active household members. It does not receive Telegram IDs, D1 IDs, tokens, or session secrets.
+
+Model output is untrusted input. The Worker validates the action, task type, title, assignees, dates, and reminder time. The user must confirm the draft before task creation.
 
 ## Telegram Login
 
@@ -162,6 +183,7 @@ Examples in documentation may use `Europe/Kyiv`, but deployments can use another
 
 - `users.timezone` - the user's current timezone preference;
 - `reminder_rules.timezone` - the timezone that defines the task rule.
+- `annual_events.timezone` - the timezone that defines an annual event and its notification time.
 
 When a user enters a date or time, the app interprets it in that user's current timezone and stores the resulting UTC timestamp.
 
@@ -186,6 +208,7 @@ Important operations must be idempotent:
 - deleting or cancelling a task;
 - sending notifications;
 - creating recurring instances.
+- sending each annual-event notification once per recipient, event date, and offset.
 
 The database schema uses status checks, assignment checks, notification logs, and uniqueness constraints to reduce duplicate effects.
 
@@ -217,6 +240,8 @@ The current architecture intentionally does not require:
 - Durable Objects;
 - Queues;
 - third-party APIs other than Telegram Bot API.
+
+Cloudflare Workers AI is an optional Cloudflare platform service rather than a required external API.
 
 These can be reconsidered if the project grows beyond small-household usage.
 
@@ -250,5 +275,6 @@ Potential replacements:
 - Cloudflare D1 -> PostgreSQL, SQLite, MySQL, Supabase;
 - Worker Secrets -> target platform secrets or environment variables;
 - Workers Static Assets -> static hosting, nginx, S3/CloudFront, or a VPS.
+- Workers AI -> another structured-output model API or a deterministic parser.
 
 Telegram Bot API remains the same across hosting providers.

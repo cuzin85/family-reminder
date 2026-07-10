@@ -3,7 +3,7 @@ import { apiErrorResponse } from "../http";
 import { recordAuditEvent } from "../audit";
 import type { AuthenticatedWebUser } from "./auth";
 
-const EXPORT_SCHEMA_VERSION = 1;
+const EXPORT_SCHEMA_VERSION = 2;
 
 type ExportRow = Record<string, number | string | null>;
 
@@ -31,6 +31,9 @@ export async function handleExportData(env: Env, user: AuthenticatedWebUser): Pr
     taskAssignees,
     completionLog,
     notificationLog,
+    annualEvents,
+    annualEventRecipients,
+    annualEventNotificationLog,
     auditLog
   ] = await Promise.all([
     selectRows(env, `
@@ -130,6 +133,53 @@ export async function handleExportData(env: Env, user: AuthenticatedWebUser): Pr
     selectRows(env, `
       SELECT
         id,
+        created_by_user_id,
+        title,
+        description,
+        event_month,
+        event_day,
+        event_year,
+        reminder_hour,
+        reminder_minute,
+        timezone,
+        notification_days_json,
+        next_notification_at,
+        next_notification_event_date,
+        next_notification_offset_days,
+        is_active,
+        created_at,
+        updated_at
+      FROM annual_events
+      ORDER BY id
+    `),
+    selectRows(env, `
+      SELECT
+        id,
+        annual_event_id,
+        user_id,
+        created_at
+      FROM annual_event_recipients
+      ORDER BY id
+    `),
+    selectRows(env, `
+      SELECT
+        id,
+        annual_event_id,
+        user_id,
+        event_date,
+        offset_days,
+        scheduled_for,
+        sent_at,
+        telegram_message_id,
+        status,
+        error_message,
+        created_at
+      FROM annual_event_notification_log
+      ORDER BY id
+    `),
+    selectRows(env, `
+      SELECT
+        id,
         actor_user_id,
         action,
         entity_type,
@@ -158,6 +208,9 @@ export async function handleExportData(env: Env, user: AuthenticatedWebUser): Pr
       task_assignees: taskAssignees,
       completion_log: completionLog,
       notification_log: notificationLog,
+      annual_events: annualEvents,
+      annual_event_recipients: annualEventRecipients,
+      annual_event_notification_log: annualEventNotificationLog,
       audit_log: auditLog
     }
   };
@@ -177,6 +230,9 @@ export async function handleExportData(env: Env, user: AuthenticatedWebUser): Pr
         task_assignees: taskAssignees.length,
         completion_log: completionLog.length,
         notification_log: notificationLog.length,
+        annual_events: annualEvents.length,
+        annual_event_recipients: annualEventRecipients.length,
+        annual_event_notification_log: annualEventNotificationLog.length,
         audit_log: auditLog.length
       }
     },

@@ -26,7 +26,7 @@ export interface MonthlyTaskWindow {
   reminderDisplay: string;
 }
 
-interface DateTimeParts {
+export interface DateTimeParts {
   year: number;
   month: number;
   day: number;
@@ -199,6 +199,20 @@ function localDateTimeToUtcDate(parts: DateTimeParts, timeZone: string): Date | 
   }
 
   return utcDate;
+}
+
+export function localDateTimeToUtcIso(parts: DateTimeParts, timeZone: string): string | null {
+  return localDateTimeToUtcDate(parts, timeZone)?.toISOString() ?? null;
+}
+
+export function getDateTimePartsInTimeZone(value: string, timeZone: string): DateTimeParts | null {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return formatParts(date, timeZone);
 }
 
 export function parseLocalDateTime(value: string, timeZone: string): ParsedLocalDateTime | null {
@@ -434,7 +448,7 @@ function buildWeeklyTaskWindow(
   };
 }
 
-function getLastDayOfMonth(year: number, month: number): number {
+export function getLastDayOfMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 

@@ -113,6 +113,38 @@ export interface MaintenanceCleanupResult {
   };
 }
 
+export interface AnnualEventListItem {
+  id: number;
+  title: string;
+  description: string | null;
+  eventMonth: number;
+  eventDay: number;
+  eventYear: number | null;
+  reminderTime: string;
+  timezone: string;
+  nextNotificationAt: string | null;
+  nextNotificationEventDate: string | null;
+  nextNotificationOffsetDays: number | null;
+  recipientIds: number[];
+  recipientNames: string | null;
+  canManage: boolean;
+}
+
+export interface UpcomingAnnualEventListItem extends AnnualEventListItem {
+  upcomingEventDate: string;
+  daysUntil: number;
+}
+
+export interface AnnualEventCreateInput {
+  title: string;
+  description?: string | null;
+  eventMonth: number;
+  eventDay: number;
+  eventYear?: number | null;
+  reminderTime: string;
+  recipientUserIds: number[];
+}
+
 export interface OneTimeTaskUpdate {
   title?: string;
   availableFrom?: string;
@@ -484,6 +516,94 @@ export async function getAssignees(): Promise<UserListItem[]> {
   }
 
   return payload.users;
+}
+
+export async function getAnnualEvents(scope: HistoryScope): Promise<AnnualEventListItem[]> {
+  const response = await fetch(`/api/annual-events?scope=${scope}`, {
+    credentials: "include",
+    headers: {
+      "accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(apiLabels.api.fallbacks.getAnnualEventsFailed);
+  }
+
+  const payload = (await response.json()) as { events?: AnnualEventListItem[]; ok: boolean };
+
+  if (!payload.ok || !payload.events) {
+    throw new Error(apiLabels.api.fallbacks.badResponse);
+  }
+
+  return payload.events;
+}
+
+export async function getUpcomingAnnualEvents(scope: HistoryScope): Promise<UpcomingAnnualEventListItem[]> {
+  const response = await fetch(`/api/annual-events/upcoming/${scope}`, {
+    credentials: "include",
+    headers: {
+      "accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(apiLabels.api.fallbacks.getAnnualEventsFailed);
+  }
+
+  const payload = (await response.json()) as { events?: UpcomingAnnualEventListItem[]; ok: boolean };
+
+  if (!payload.ok || !payload.events) {
+    throw new Error(apiLabels.api.fallbacks.badResponse);
+  }
+
+  return payload.events;
+}
+
+export async function createAnnualEvent(input: AnnualEventCreateInput): Promise<void> {
+  const response = await fetch("/api/annual-events", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "accept": "application/json",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await getApiErrorMessage(response, apiLabels.api.fallbacks.createAnnualEventFailed));
+  }
+}
+
+export async function deleteAnnualEvent(eventId: number): Promise<void> {
+  const response = await fetch(`/api/annual-events/${eventId}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers: {
+      "accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(await getApiErrorMessage(response, apiLabels.api.fallbacks.deleteAnnualEventFailed));
+  }
+}
+
+export async function updateAnnualEvent(eventId: number, input: AnnualEventCreateInput): Promise<void> {
+  const response = await fetch(`/api/annual-events/${eventId}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "accept": "application/json",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await getApiErrorMessage(response, apiLabels.api.fallbacks.createAnnualEventFailed));
+  }
 }
 
 export async function updateOneTimeTask(taskId: number, input: OneTimeTaskUpdate): Promise<void> {
