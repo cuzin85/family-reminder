@@ -63,6 +63,7 @@ wrangler.jsonc       Cloudflare Workers configuration template
 
 Additional documentation:
 
+- [AGENTS.md](./AGENTS.md) - safety and workflow rules for AI coding agents
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [WEB_ARCHITECTURE.md](./WEB_ARCHITECTURE.md)
 - [DOMAIN.md](./DOMAIN.md)
@@ -70,6 +71,10 @@ Additional documentation:
 - [RUNBOOK.md](./RUNBOOK.md)
 - [SECURITY.md](./SECURITY.md)
 - [PRIVACY.md](./PRIVACY.md)
+
+## AI Coding Agents
+
+When using Codex or another AI coding agent, ask it to read `AGENTS.md` before making changes. The file defines public-repository safety rules, architecture constraints, validation commands, and operations that require explicit approval.
 
 ## Requirements
 

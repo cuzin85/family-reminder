@@ -311,7 +311,7 @@ If you changed Telegram webhook, reminder processing, Cron behavior, or shared r
 
 ## Wrangler Authentication
 
-`npx wrangler login` opens a browser flow that redirects to `localhost`. This works well on a local computer, but may fail in remote development environments such as Codespaces or SSH-only servers because the callback URL points to the remote machine, not your browser.
+`npx wrangler login` opens a browser flow that redirects to `localhost`. This works well on a local computer, but may fail in remote or SSH-only development environments because the callback URL points to the remote machine, not your browser.
 
 If browser login does not complete in a remote environment, use one of these approaches:
 
