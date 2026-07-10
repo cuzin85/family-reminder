@@ -280,6 +280,8 @@ Deploy the production web Worker:
 npm run deploy:web
 ```
 
+The bot deploy script explicitly selects the top-level Wrangler environment. During a web or web-dev deploy, Wrangler may warn that the top-level AI variables and `AI` binding are not inherited. This is expected: Workers AI is intentionally attached only to the bot Worker.
+
 The bot Worker owns:
 
 - Telegram webhook endpoint
