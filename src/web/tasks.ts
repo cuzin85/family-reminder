@@ -1,4 +1,5 @@
 import {
+  countTaskHistoryForUser,
   completeTaskForUser,
   createMonthlyEndPlusStartTask,
   createMonthlyFixedTask,
@@ -25,6 +26,7 @@ import {
   type MissTaskResult,
   type TaskDeletePreview,
   type TaskHistoryItem,
+  type TaskHistoryStatus,
   type TaskListItem
 } from "../tasks";
 import { recordAuditEvent } from "../audit";
@@ -38,6 +40,7 @@ type WebTaskStatus = TaskListItem["status"];
 type HistoryScope = "family" | "my";
 const HISTORY_DEFAULT_LIMIT = 10;
 const HISTORY_MAX_LIMIT = 50;
+const HISTORY_STATUSES: readonly TaskHistoryStatus[] = ["done", "done_late", "missed", "cancelled"];
 const AUDIT_CHAIN_MAX_DEPTH = 20;
 const AUDIT_MAX_EVENTS = 50;
 
@@ -419,7 +422,7 @@ export async function handleGetTaskHistory(
   env: Env,
   user: AuthenticatedWebUser,
   scope: HistoryScope,
-  input: { limit?: number; offset?: number } = {}
+  input: { limit?: number; offset?: number; status?: string | null } = {}
 ): Promise<Response> {
   const effectiveScope: HistoryScope = user.isAdmin ? scope : "my";
   const rawLimit = input.limit;
@@ -430,16 +433,28 @@ export async function handleGetTaskHistory(
   const offset = typeof rawOffset === "number" && Number.isSafeInteger(rawOffset) && rawOffset > 0
     ? rawOffset
     : 0;
-  const tasks = await getTaskHistoryForUser(env, user.id, effectiveScope === "family", limit + 1, offset);
-  const visibleTasks = tasks.slice(0, limit);
+  const rawStatus = input.status;
+
+  if (rawStatus !== undefined && rawStatus !== null && rawStatus !== "all" && !HISTORY_STATUSES.includes(rawStatus as TaskHistoryStatus)) {
+    return apiErrorResponse("invalid_history_status", 400);
+  }
+
+  const status = rawStatus && rawStatus !== "all" ? rawStatus as TaskHistoryStatus : null;
+  const isFamilyScope = effectiveScope === "family";
+  const [tasks, total] = await Promise.all([
+    getTaskHistoryForUser(env, user.id, isFamilyScope, limit, offset, status),
+    countTaskHistoryForUser(env, user.id, isFamilyScope, status)
+  ]);
 
   return jsonResponse({
-    hasMore: tasks.length > limit,
+    hasMore: offset + tasks.length < total,
     limit,
     offset,
     ok: true,
     scope: effectiveScope,
-    tasks: visibleTasks.map(toWebHistoryItem)
+    status: status ?? "all",
+    tasks: tasks.map(toWebHistoryItem),
+    total
   });
 }
 

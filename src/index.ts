@@ -140,7 +140,11 @@ async function handleApiRequest(request: Request, env: Env, url: URL): Promise<R
     const limit = Number(url.searchParams.get("limit"));
     const offset = Number(url.searchParams.get("offset"));
 
-    return handleGetTaskHistory(env, user, scope, { limit, offset });
+    return handleGetTaskHistory(env, user, scope, {
+      limit,
+      offset,
+      status: url.searchParams.get("status")
+    });
   }
 
   if (url.pathname === "/api/users") {

@@ -60,7 +60,7 @@ type TaskLoadState =
 
 type HistoryLoadState =
   | { status: "loading" }
-  | { status: "ready"; hasMore: boolean; offset: number; tasks: TaskHistoryItem[] }
+  | { status: "ready"; hasMore: boolean; offset: number; tasks: TaskHistoryItem[]; total: number }
   | { status: "error"; message: string };
 
 type UsersLoadState =
@@ -1317,7 +1317,7 @@ function HistorySection({ user }: { user: CurrentUser }) {
     setState({ status: "loading" });
     let isMounted = true;
 
-    getTaskHistory(scope, HISTORY_PAGE_SIZE, nextOffset)
+    getTaskHistory(scope, HISTORY_PAGE_SIZE, nextOffset, statusFilter)
       .then((page) => {
         if (isMounted) {
           setOffset(page.offset);
@@ -1325,7 +1325,8 @@ function HistorySection({ user }: { user: CurrentUser }) {
             status: "ready",
             hasMore: page.hasMore,
             offset: page.offset,
-            tasks: page.tasks
+            tasks: page.tasks,
+            total: page.total
           });
         }
       })
@@ -1345,13 +1346,7 @@ function HistorySection({ user }: { user: CurrentUser }) {
 
   useEffect(() => {
     return refreshHistory(0);
-  }, [scope]);
-
-  const visibleTasks = state.status === "ready" && statusFilter !== "all"
-    ? state.tasks.filter((task) => task.status === statusFilter)
-    : state.status === "ready"
-      ? state.tasks
-      : [];
+  }, [scope, statusFilter]);
 
   return (
     <Panel className="tasks-panel" title={labels.history.title} description={labels.history.description}>
@@ -1389,7 +1384,10 @@ function HistorySection({ user }: { user: CurrentUser }) {
             className="select"
             value={statusFilter}
             aria-label={labels.history.statusFilterLabel}
-            onChange={(event) => setStatusFilter(event.target.value as HistoryStatusFilter)}
+            onChange={(event) => {
+              setOffset(0);
+              setStatusFilter(event.target.value as HistoryStatusFilter);
+            }}
           >
             <option value="all">{labels.history.allStatuses}</option>
             <option value="done">{labels.history.done}</option>
@@ -1406,14 +1404,13 @@ function HistorySection({ user }: { user: CurrentUser }) {
       {state.status === "loading" ? <div className="empty-state">{labels.history.loading}</div> : null}
       {state.status === "error" ? <div className="empty-state empty-state--error">{state.message}</div> : null}
       {state.status === "ready" && state.tasks.length === 0 ? (
-        <div className="empty-state">{labels.history.empty}</div>
+        <div className="empty-state">
+          {statusFilter === "all" ? labels.history.empty : labels.history.filteredEmpty}
+        </div>
       ) : null}
-      {state.status === "ready" && state.tasks.length > 0 && visibleTasks.length === 0 ? (
-        <div className="empty-state">{labels.history.filteredEmpty}</div>
-      ) : null}
-      {state.status === "ready" && visibleTasks.length > 0 ? (
+      {state.status === "ready" && state.tasks.length > 0 ? (
         <div className="task-list">
-          {visibleTasks.map((task) => (
+          {state.tasks.map((task) => (
             <HistoryCard key={task.id} task={task} timezone={user.timezone} />
           ))}
         </div>
@@ -1429,9 +1426,11 @@ function HistorySection({ user }: { user: CurrentUser }) {
             {labels.common.back}
           </Button>
           <span>
-            {state.tasks.length === 0
-              ? labels.history.records(0)
-              : `${state.offset + 1}-${state.offset + state.tasks.length}`}
+            {labels.history.records(
+              state.total === 0 ? 0 : state.offset + 1,
+              Math.min(state.offset + state.tasks.length, state.total),
+              state.total
+            )}
           </span>
           <Button
             variant="ghost"
@@ -2025,6 +2024,8 @@ function AnnualEventsSection({
   const [page, setPage] = useState(0);
   const [scope, setScope] = useState<HistoryScope>("my");
   const [state, setState] = useState<AnnualEventsLoadState>({ status: "loading" });
+  const eventListRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
 
   const loadAnnualEvents = (message?: string) => {
     if (message) {
@@ -2119,10 +2120,28 @@ function AnnualEventsSection({
     ? state.events.slice(pageStart, pageStart + ANNUAL_EVENTS_PAGE_SIZE)
     : [];
   const emptyText = scope === "my" ? labels.annualEvents.emptyMy : labels.annualEvents.emptyFamily;
+  const changePage = (nextPage: number) => {
+    setPage(nextPage);
+    window.requestAnimationFrame(() => {
+      const eventList = eventListRef.current;
+      const toolbar = toolbarRef.current;
+
+      if (!eventList || !toolbar) {
+        return;
+      }
+
+      const rootStyles = window.getComputedStyle(document.documentElement);
+      const stickyTop = Number.parseFloat(rootStyles.getPropertyValue("--sticky-task-tabs-top")) || 0;
+      const toolbarHeight = toolbar.getBoundingClientRect().height;
+      const targetTop = window.scrollY + eventList.getBoundingClientRect().top - stickyTop - toolbarHeight - 8;
+
+      window.scrollTo({ top: Math.max(0, targetTop), behavior: "auto" });
+    });
+  };
 
   return (
     <Panel className="tasks-panel annual-events-panel" title={labels.annualEvents.title} description={labels.annualEvents.description}>
-      <div className="task-toolbar task-toolbar--tasks sticky-panel-toolbar">
+      <div ref={toolbarRef} className="task-toolbar task-toolbar--tasks sticky-panel-toolbar">
         <div className="tabs" role="tablist" aria-label={labels.annualEvents.listLabel}>
           <button
             className={`tab ${scope === "my" ? "tab--active" : ""}`}
@@ -2165,7 +2184,7 @@ function AnnualEventsSection({
       {state.status === "error" ? <div className="empty-state empty-state--error">{state.message}</div> : null}
       {state.status === "ready" && state.events.length === 0 ? <div className="empty-state">{emptyText}</div> : null}
       {state.status === "ready" && visibleEvents.length > 0 ? (
-        <div className="task-list annual-event-list">
+        <div ref={eventListRef} className="task-list annual-event-list">
           {visibleEvents.map((event) => (
             <AnnualEventListCard
               key={event.id}
@@ -2186,7 +2205,7 @@ function AnnualEventsSection({
             variant="ghost"
             type="button"
             disabled={currentPage === 0}
-            onClick={() => setPage(Math.max(0, currentPage - 1))}
+            onClick={() => changePage(Math.max(0, currentPage - 1))}
           >
             {labels.common.back}
           </Button>
@@ -2201,7 +2220,7 @@ function AnnualEventsSection({
             variant="ghost"
             type="button"
             disabled={currentPage >= lastPage}
-            onClick={() => setPage(Math.min(lastPage, currentPage + 1))}
+            onClick={() => changePage(Math.min(lastPage, currentPage + 1))}
           >
             {labels.common.next}
           </Button>

@@ -595,6 +595,7 @@ a {
 }
 
 .task-card__title-icon {
+  color: var(--text-muted);
   flex: 0 0 18px;
   height: 18px;
   margin-top: 3px;
@@ -719,6 +720,10 @@ a {
 
 .field-grid .field:last-child {
   grid-column: 1 / -1;
+}
+
+.field-grid--annual-event {
+  align-items: end;
 }
 
 .field-grid--annual-event .field {

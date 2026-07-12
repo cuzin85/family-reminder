@@ -125,7 +125,7 @@ export interface AppLabels {
     loadFailed: string;
     missed: string;
     myScope: string;
-    records: (count: number) => string;
+    records: (start: number, end: number, total: number) => string;
     statusFilterLabel: string;
     title: string;
     toolbarLabel: string;
@@ -686,7 +686,7 @@ const RU_LABELS: AppLabels = {
     loadFailed: "Не удалось загрузить историю.",
     missed: "Пропущенные",
     myScope: "Только мои",
-    records: (count) => `${count} записей`,
+    records: (start, end, total) => total === 0 ? "0 записей" : `${start}-${end} из ${total}`,
     statusFilterLabel: "Фильтр статуса истории",
     title: "История и архив",
     toolbarLabel: "Область истории"
@@ -1282,7 +1282,7 @@ const EN_LABELS: AppLabels = {
     loadFailed: "Failed to load history.",
     missed: "Missed",
     myScope: "Only mine",
-    records: (count) => `${count} records`,
+    records: (start, end, total) => total === 0 ? "0 records" : `${start}-${end} of ${total}`,
     statusFilterLabel: "History status filter",
     title: "History and archive",
     toolbarLabel: "History scope"

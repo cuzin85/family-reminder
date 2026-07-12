@@ -78,13 +78,15 @@ export interface TaskHistoryItem {
   schedule_type: string | null;
   schedule_params_json: string | null;
   rule_timezone: string | null;
-  status: "done" | "done_late" | "missed" | "cancelled";
+  status: TaskHistoryStatus;
   available_from: string;
   due_at: string;
   closed_at: string | null;
   closed_by_name: string | null;
   assignee_names: string | null;
 }
+
+export type TaskHistoryStatus = "done" | "done_late" | "missed" | "cancelled";
 
 export interface TaskDeletePreview {
   status: "found" | "not_found_or_closed";
@@ -397,7 +399,8 @@ export async function getTaskHistoryForUser(
   userId: number,
   isAdmin: boolean,
   limit = 30,
-  offset = 0
+  offset = 0,
+  status: TaskHistoryStatus | null = null
 ): Promise<TaskHistoryItem[]> {
   const result = await env.DB.prepare(
     `
@@ -434,6 +437,7 @@ export async function getTaskHistoryForUser(
       LEFT JOIN users assignee_users
         ON assignee_users.id = task_assignees.user_id
       WHERE task_instances.status IN ('done', 'done_late', 'missed', 'cancelled')
+        AND (? IS NULL OR task_instances.status = ?)
         AND (
           ? = 1
           OR task_instances.closed_by_user_id = ?
@@ -475,10 +479,50 @@ export async function getTaskHistoryForUser(
       OFFSET ?
     `
   )
-    .bind(isAdmin ? 1 : 0, userId, userId, limit, offset)
+    .bind(status, status, isAdmin ? 1 : 0, userId, userId, limit, offset)
     .all<TaskHistoryItem>();
 
   return result.results ?? [];
+}
+
+export async function countTaskHistoryForUser(
+  env: Env,
+  userId: number,
+  isAdmin: boolean,
+  status: TaskHistoryStatus | null = null
+): Promise<number> {
+  const result = await env.DB.prepare(
+    `
+      SELECT COUNT(*) AS total
+      FROM task_instances
+      WHERE task_instances.status IN ('done', 'done_late', 'missed', 'cancelled')
+        AND (? IS NULL OR task_instances.status = ?)
+        AND (
+          ? = 1
+          OR task_instances.closed_by_user_id = ?
+          OR EXISTS (
+            SELECT 1
+            FROM task_assignees visible_assignees
+            WHERE visible_assignees.task_instance_id = task_instances.id
+              AND visible_assignees.user_id = ?
+          )
+        )
+        AND NOT (
+          task_instances.status = 'cancelled'
+          AND EXISTS (
+            SELECT 1
+            FROM audit_log audit
+            WHERE audit.entity_type = 'task'
+              AND audit.action = 'task.updated'
+              AND json_extract(audit.metadata_json, '$.previousTaskId') = task_instances.id
+          )
+        )
+    `
+  )
+    .bind(status, status, isAdmin ? 1 : 0, userId, userId)
+    .first<{ total: number }>();
+
+  return result?.total ?? 0;
 }
 
 export async function getActiveTaskForUser(

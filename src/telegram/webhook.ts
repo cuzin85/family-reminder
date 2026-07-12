@@ -483,10 +483,22 @@ function buildDeleteConfirmKeyboard(taskId: number, labels: AppLabels): InlineKe
 
 function buildDeleteConfirmText(title: string, isRecurring: boolean, labels: AppLabels): string {
   if (isRecurring) {
-    return `${labels.telegram.deleteConfirm.recurringTitle}\n\n${title}\n\n${labels.telegram.deleteConfirm.recurringDescription}`;
+    return buildConfirmationText(
+      labels.telegram.deleteConfirm.recurringTitle,
+      title,
+      labels.telegram.deleteConfirm.recurringDescription
+    );
   }
 
-  return `${labels.telegram.deleteConfirm.singleTitle}\n\n${title}\n\n${labels.telegram.deleteConfirm.singleDescription}`;
+  return buildConfirmationText(
+    labels.telegram.deleteConfirm.singleTitle,
+    title,
+    labels.telegram.deleteConfirm.singleDescription
+  );
+}
+
+function buildConfirmationText(title: string, taskTitle: string, description: string): string {
+  return `<b>${escapeHtml(title.toUpperCase())}</b>\n\n<b>${escapeHtml(taskTitle)}</b>\n\n${escapeHtml(description)}`;
 }
 
 function isRecurringTask(task: Pick<TelegramTaskListItem, "schedule_type">): boolean {
@@ -512,7 +524,7 @@ function buildTaskCloseConfirmText(
       ? labels.taskCloseConfirm.recurringCompleteDescription
       : labels.taskCloseConfirm.singleCompleteDescription;
 
-  return `${title}\n\n${task.title}\n\n${description}`;
+  return buildConfirmationText(title, task.title, description);
 }
 
 function buildTaskReminderText(task: TelegramTaskListItem, timezone: string, labels: AppLabels): string {
@@ -4237,17 +4249,18 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
         const callbackMessageId = update.callback_query?.message?.message_id;
         const confirmText = buildTaskCloseConfirmText(task, action, labels);
         const confirmKeyboard = buildTaskCloseConfirmKeyboard(taskId, action, source, labels);
+        const confirmOptions = { parseMode: "HTML" as const };
 
         await answerCallbackQuery(env, update.callback_query?.id ?? "");
 
         if (callbackMessageId) {
           try {
-            await editTelegramMessageText(env, context.chat.id, callbackMessageId, confirmText, confirmKeyboard);
+            await editTelegramMessageText(env, context.chat.id, callbackMessageId, confirmText, confirmKeyboard, confirmOptions);
           } catch {
-            await sendTelegramMessage(env, context.chat.id, confirmText, confirmKeyboard);
+            await sendTelegramMessage(env, context.chat.id, confirmText, confirmKeyboard, confirmOptions);
           }
         } else {
-          await sendTelegramMessage(env, context.chat.id, confirmText, confirmKeyboard);
+          await sendTelegramMessage(env, context.chat.id, confirmText, confirmKeyboard, confirmOptions);
         }
       }
     }
@@ -4305,14 +4318,16 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
               context.chat.id,
               callbackMessageId,
               buildDeleteConfirmText(preview.title, preview.isRecurring, labels),
-              buildDeleteConfirmKeyboard(taskId, labels)
+              buildDeleteConfirmKeyboard(taskId, labels),
+              { parseMode: "HTML" }
             );
           } catch {
             await sendTelegramMessage(
               env,
               context.chat.id,
               buildDeleteConfirmText(preview.title, preview.isRecurring, labels),
-              buildDeleteConfirmKeyboard(taskId, labels)
+              buildDeleteConfirmKeyboard(taskId, labels),
+              { parseMode: "HTML" }
             );
           }
         } else {
@@ -4320,7 +4335,8 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
             env,
             context.chat.id,
             buildDeleteConfirmText(preview.title, preview.isRecurring, labels),
-            buildDeleteConfirmKeyboard(taskId, labels)
+            buildDeleteConfirmKeyboard(taskId, labels),
+            { parseMode: "HTML" }
           );
         }
       }

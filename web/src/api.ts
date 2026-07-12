@@ -70,6 +70,7 @@ export interface TaskHistoryPage {
   limit: number;
   offset: number;
   tasks: TaskHistoryItem[];
+  total: number;
 }
 
 export interface UserListItem {
@@ -326,11 +327,17 @@ export async function getTaskAudit(taskId: number): Promise<TaskAuditItem[]> {
   return payload.events;
 }
 
-export async function getTaskHistory(scope: HistoryScope, limit: number, offset: number): Promise<TaskHistoryPage> {
+export async function getTaskHistory(
+  scope: HistoryScope,
+  limit: number,
+  offset: number,
+  status: "all" | TaskHistoryItem["status"]
+): Promise<TaskHistoryPage> {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
-    scope
+    scope,
+    status
   });
   const response = await fetch(`/api/tasks/history?${params.toString()}`, {
     credentials: "include",
@@ -349,6 +356,7 @@ export async function getTaskHistory(scope: HistoryScope, limit: number, offset:
     offset?: number;
     ok: boolean;
     tasks?: TaskHistoryItem[];
+    total?: number;
   };
 
   if (
@@ -356,7 +364,8 @@ export async function getTaskHistory(scope: HistoryScope, limit: number, offset:
     !payload.tasks ||
     typeof payload.hasMore !== "boolean" ||
     typeof payload.limit !== "number" ||
-    typeof payload.offset !== "number"
+    typeof payload.offset !== "number" ||
+    typeof payload.total !== "number"
   ) {
     throw new Error(apiLabels.api.fallbacks.badResponse);
   }
@@ -365,7 +374,8 @@ export async function getTaskHistory(scope: HistoryScope, limit: number, offset:
     hasMore: payload.hasMore,
     limit: payload.limit,
     offset: payload.offset,
-    tasks: payload.tasks
+    tasks: payload.tasks,
+    total: payload.total
   };
 }
 
