@@ -1079,12 +1079,14 @@ function AnnualEventTaskCard({
   event,
   onDelete,
   onEdit,
-  showRecipients
+  showRecipients,
+  viewerTimezone
 }: {
   event: UpcomingAnnualEventListItem;
   onDelete: (eventId: number) => Promise<void>;
   onEdit: (eventId: number) => void;
   showRecipients: boolean;
+  viewerTimezone: string;
 }) {
   const labels = useI18n();
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -1121,7 +1123,7 @@ function AnnualEventTaskCard({
           <span>{labels.navigation.events}</span>
           <span>{labels.annualEvents.dateLabel}: {htmlDateToDisplay(event.upcomingEventDate)}</span>
           {eventYearText ? <span>{labels.annualEvents.eventYear}: {eventYearText}</span> : null}
-          <span>{labels.annualEvents.reminderTime}: {event.reminderTime} ({event.timezone})</span>
+          <span>{labels.annualEvents.reminderTime}: {event.reminderTime}{getTaskTimezoneSuffix(event.timezone, viewerTimezone)}</span>
           <span>
             {labels.annualEvents.nextNotification}: {event.nextNotificationAt
               ? formatDateTime(event.nextNotificationAt, event.timezone, labels)
@@ -1153,11 +1155,13 @@ function AnnualEventTaskCard({
 function AnnualEventListCard({
   event,
   onDelete,
-  onEdit
+  onEdit,
+  viewerTimezone
 }: {
   event: AnnualEventListItem;
   onDelete: (event: AnnualEventListItem) => void;
   onEdit: (event: AnnualEventListItem) => void;
+  viewerTimezone: string;
 }) {
   const labels = useI18n();
   const eventYearText = formatAnnualEventYear(event, labels);
@@ -1174,7 +1178,7 @@ function AnnualEventListCard({
         <div className="task-card__meta">
           <span>{labels.annualEvents.dateLabel}: {formatAnnualEventDate(event)}</span>
           {eventYearText ? <span>{labels.annualEvents.eventYear}: {eventYearText}</span> : null}
-          <span>{labels.annualEvents.reminderTime}: {event.reminderTime} ({event.timezone})</span>
+          <span>{labels.annualEvents.reminderTime}: {event.reminderTime}{getTaskTimezoneSuffix(event.timezone, viewerTimezone)}</span>
           <span>
             {labels.annualEvents.nextNotification}: {event.nextNotificationAt
               ? formatDateTime(event.nextNotificationAt, event.timezone, labels)
@@ -1254,6 +1258,7 @@ function TaskListContent({
           onDelete={onAnnualEventDelete}
           onEdit={onAnnualEventEdit}
           showRecipients={showAssignees}
+          viewerTimezone={user.timezone}
         />
       ) : (
         <TaskCard
@@ -2195,6 +2200,7 @@ function AnnualEventsSection({
                 setNotice(null);
                 setModalEvent(nextEvent);
               }}
+              viewerTimezone={user.timezone}
             />
           ))}
         </div>

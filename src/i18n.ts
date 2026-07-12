@@ -892,10 +892,10 @@ const RU_LABELS: AppLabels = {
       chooseMonthlyMode: "Как задать ежемесячное окно выполнения?",
       chooseTaskType: "Как часто должна повторяться задача?",
       chooseWeekday: "В какой день недели выполнять задачу?",
-      createdMonthly: (title, assignees, window, reminder) => `Ежемесячная задача создана: ${title}\nИсполнители: ${assignees}\nОкно: ${window}\nНапоминание: ${reminder}`,
-      createdOneTime: (title, assignees, due, reminder) => `Задача создана: ${title}\nИсполнители: ${assignees}\nСрок: ${due}, 23:59\nНапоминание: ${reminder}`,
-      createdOneTimeWindow: (title, assignees, window, reminder) => `Разовая задача с окном создана: ${title}\nИсполнители: ${assignees}\nОкно: ${window}\nНапоминание: ${reminder}`,
-      createdWeekly: (title, assignees, weekday, reminder, due) => `Еженедельная задача создана: ${title}\nИсполнители: ${assignees}\nДень: ${weekday}\nНапоминание: ${reminder}\nБлижайший срок: ${due}`,
+      createdMonthly: (title, assignees, window, reminder) => `<i>Ежемесячная задача создана</i>\n\n<b>${title}</b>\n\n<i>Исполнители:</i> ${assignees}\n<i>Окно:</i> ${window}\n<i>Напоминание:</i> ${reminder}`,
+      createdOneTime: (title, assignees, due, reminder) => `<i>Задача создана</i>\n\n<b>${title}</b>\n\n<i>Исполнители:</i> ${assignees}\n<i>Срок:</i> ${due}, 23:59\n<i>Напоминание:</i> ${reminder}`,
+      createdOneTimeWindow: (title, assignees, window, reminder) => `<i>Разовая задача с окном создана</i>\n\n<b>${title}</b>\n\n<i>Исполнители:</i> ${assignees}\n<i>Окно:</i> ${window}\n<i>Напоминание:</i> ${reminder}`,
+      createdWeekly: (title, assignees, weekday, reminder, due) => `<i>Еженедельная задача создана</i>\n\n<b>${title}</b>\n\n<i>Исполнители:</i> ${assignees}\n<i>День:</i> ${weekday}\n<i>Напоминание:</i> ${reminder}\n<i>Ближайший срок:</i> ${due}`,
       createAgain: "Нажмите «Создать задачу» ещё раз.",
       dailyReminderTime: "Введите время ежедневного напоминания в формате HH:mm. Например: 09:00",
       dueDate: "Введите дату выполнения в формате dd-mm-yyyy. Например: 25-06-2026",
@@ -933,7 +933,7 @@ const RU_LABELS: AppLabels = {
       applyWeeklyAssignees: "Применить новых исполнителей только к будущим еженедельным задачам или к текущей тоже?",
       cancelled: "Редактирование задачи отменено.",
       chooseField: "Выберите, что изменить.",
-      chooseFieldFor: (title) => `Что изменить?\n\n${title}`,
+      chooseFieldFor: (title) => `<i>Что изменить?</i>\n\n<b>${title}</b>`,
       chooseNewWeekday: "Выберите новый день недели.",
       dueAtChanged: (due) => `Срок изменен: ${due}, 23:59`,
       dueAtOnlyOneTime: "Срок напрямую меняется только у разовых задач.",
@@ -956,7 +956,7 @@ const RU_LABELS: AppLabels = {
       scheduleConfirm: (lines) => `Изменение расписания пересоздаст текущую активную задачу.\n\n${lines.join("\n")}\n\nПродолжить?`,
       scheduleFallback: "ежемесячное окно",
       taskTypeNotEditable: "Пока можно редактировать только разовые, еженедельные и ежемесячные задачи.",
-      titleChanged: (title) => `Название изменено: ${title}`,
+      titleChanged: (title) => `<i>Название изменено:</i> <b>${title}</b>`,
       weekdayChanged: (weekday, time) => `Расписание изменено: ${weekday} ${time}`,
       weekdayOnlyWeekly: "День недели меняется только у еженедельных задач.",
       weeklyScheduleReadFailed: "Не удалось прочитать текущее еженедельное расписание.",
@@ -1003,9 +1003,9 @@ const RU_LABELS: AppLabels = {
       annualEvent: (title, eventDate, offsetDays) => {
         const when = offsetDays === 0 ? "сегодня" : `через ${offsetDays} ${formatRuDayCount(offsetDays)}`;
 
-        return `Ежегодное событие: ${title}\nДата события: ${eventDate} (${when})`;
+        return `<i>Ежегодное событие</i>\n\n<b>${title}</b>\n\n<i>Дата события:</i> ${eventDate} (${when})`;
       },
-      reminder: (title, dueAt) => `Напоминание: ${title}\nСрок: ${dueAt}`
+      reminder: (title, dueAt) => `<i>Напоминание</i>\n\n<b>${title}</b>\n\n<i>Срок:</i> ${dueAt}`
     },
     notices: {
       cancelled: "Задача отменена.",
@@ -1019,13 +1019,13 @@ const RU_LABELS: AppLabels = {
       snoozedOneHour: "Напомню через час."
     },
     results: {
-      cancelled: (title) => `Задача отменена: ${title}`,
+      cancelled: (title) => `<i>Задача отменена</i>\n\n<b>${title}</b>`,
       deleteCancelled: "Удаление задачи отменено.",
-      deletedInstance: (title) => `Задача удалена.\n\n${title}\n\nОна убрана из активных списков.`,
-      deletedRule: (title) => `Повторяющаяся задача удалена.\n\n${title}\n\nПовторение отключено, текущая задача убрана из активных списков.`,
-      done: (title) => `Задача выполнена: ${title}`,
-      missed: (title) => `Задача пропущена: ${title}`,
-      snoozed: (title, time) => `Напомню ещё раз: ${title}\nВремя: ${time}`
+      deletedInstance: (title) => `<i>Задача удалена</i>\n\n<b>${title}</b>\n\nОна убрана из активных списков.`,
+      deletedRule: (title) => `<i>Повторяющаяся задача удалена</i>\n\n<b>${title}</b>\n\nПовторение отключено, текущая задача убрана из активных списков.`,
+      done: (title) => `<i>Задача выполнена</i>\n\n<b>${title}</b>`,
+      missed: (title) => `<i>Задача пропущена</i>\n\n<b>${title}</b>`,
+      snoozed: (title, time) => `<i>Напомню ещё раз</i>\n\n<b>${title}</b>\n\n<i>Время:</i> ${time}`
     },
     monthlyModes: {
       endPlusStart: "Конец + начало месяца",
@@ -1488,10 +1488,10 @@ const EN_LABELS: AppLabels = {
       chooseMonthlyMode: "How should the monthly completion window be set?",
       chooseTaskType: "How often should this task repeat?",
       chooseWeekday: "Which weekday should this task be done on?",
-      createdMonthly: (title, assignees, window, reminder) => `Monthly task created: ${title}\nAssignees: ${assignees}\nWindow: ${window}\nReminder: ${reminder}`,
-      createdOneTime: (title, assignees, due, reminder) => `Task created: ${title}\nAssignees: ${assignees}\nDue: ${due}, 23:59\nReminder: ${reminder}`,
-      createdOneTimeWindow: (title, assignees, window, reminder) => `One-time task with window created: ${title}\nAssignees: ${assignees}\nWindow: ${window}\nReminder: ${reminder}`,
-      createdWeekly: (title, assignees, weekday, reminder, due) => `Weekly task created: ${title}\nAssignees: ${assignees}\nDay: ${weekday}\nReminder: ${reminder}\nNext due: ${due}`,
+      createdMonthly: (title, assignees, window, reminder) => `<i>Monthly task created</i>\n\n<b>${title}</b>\n\n<i>Assignees:</i> ${assignees}\n<i>Window:</i> ${window}\n<i>Reminder:</i> ${reminder}`,
+      createdOneTime: (title, assignees, due, reminder) => `<i>Task created</i>\n\n<b>${title}</b>\n\n<i>Assignees:</i> ${assignees}\n<i>Due:</i> ${due}, 23:59\n<i>Reminder:</i> ${reminder}`,
+      createdOneTimeWindow: (title, assignees, window, reminder) => `<i>One-time task with window created</i>\n\n<b>${title}</b>\n\n<i>Assignees:</i> ${assignees}\n<i>Window:</i> ${window}\n<i>Reminder:</i> ${reminder}`,
+      createdWeekly: (title, assignees, weekday, reminder, due) => `<i>Weekly task created</i>\n\n<b>${title}</b>\n\n<i>Assignees:</i> ${assignees}\n<i>Day:</i> ${weekday}\n<i>Reminder:</i> ${reminder}\n<i>Next due:</i> ${due}`,
       createAgain: "Press Create task again.",
       dailyReminderTime: "Enter the daily reminder time in HH:mm format. For example: 09:00",
       dueDate: "Enter the due date in dd-mm-yyyy format. For example: 25-06-2026",
@@ -1529,7 +1529,7 @@ const EN_LABELS: AppLabels = {
       applyWeeklyAssignees: "Apply the new assignees only to future weekly tasks, or to the current one too?",
       cancelled: "Task editing cancelled.",
       chooseField: "Choose what to edit.",
-      chooseFieldFor: (title) => `What do you want to edit?\n\n${title}`,
+      chooseFieldFor: (title) => `<i>What do you want to edit?</i>\n\n<b>${title}</b>`,
       chooseNewWeekday: "Choose a new weekday.",
       dueAtChanged: (due) => `Due date changed: ${due}, 23:59`,
       dueAtOnlyOneTime: "Due date can only be changed directly for one-time tasks.",
@@ -1552,7 +1552,7 @@ const EN_LABELS: AppLabels = {
       scheduleConfirm: (lines) => `Changing the schedule will recreate the current active task.\n\n${lines.join("\n")}\n\nContinue?`,
       scheduleFallback: "monthly window",
       taskTypeNotEditable: "For now, only one-time, weekly, and monthly tasks can be edited.",
-      titleChanged: (title) => `Title changed: ${title}`,
+      titleChanged: (title) => `<i>Title changed:</i> <b>${title}</b>`,
       weekdayChanged: (weekday, time) => `Schedule changed: ${weekday} ${time}`,
       weekdayOnlyWeekly: "Weekday can only be changed for weekly tasks.",
       weeklyScheduleReadFailed: "Could not read the current weekly schedule.",
@@ -1593,9 +1593,9 @@ const EN_LABELS: AppLabels = {
       annualEvent: (title, eventDate, offsetDays) => {
         const when = offsetDays === 0 ? "today" : `in ${offsetDays} ${offsetDays === 1 ? "day" : "days"}`;
 
-        return `Annual event: ${title}\nEvent date: ${eventDate} (${when})`;
+        return `<i>Annual event</i>\n\n<b>${title}</b>\n\n<i>Event date:</i> ${eventDate} (${when})`;
       },
-      reminder: (title, dueAt) => `Reminder: ${title}\nDue: ${dueAt}`
+      reminder: (title, dueAt) => `<i>Reminder</i>\n\n<b>${title}</b>\n\n<i>Due:</i> ${dueAt}`
     },
     notices: {
       cancelled: "Task cancelled.",
@@ -1609,13 +1609,13 @@ const EN_LABELS: AppLabels = {
       snoozedOneHour: "I will remind you in one hour."
     },
     results: {
-      cancelled: (title) => `Task cancelled: ${title}`,
+      cancelled: (title) => `<i>Task cancelled</i>\n\n<b>${title}</b>`,
       deleteCancelled: "Task deletion cancelled.",
-      deletedInstance: (title) => `Task deleted.\n\n${title}\n\nIt was removed from active lists.`,
-      deletedRule: (title) => `Recurring task deleted.\n\n${title}\n\nThe recurrence was disabled and the current task was removed from active lists.`,
-      done: (title) => `Task done: ${title}`,
-      missed: (title) => `Task missed: ${title}`,
-      snoozed: (title, time) => `I will remind you again: ${title}\nTime: ${time}`
+      deletedInstance: (title) => `<i>Task deleted</i>\n\n<b>${title}</b>\n\nIt was removed from active lists.`,
+      deletedRule: (title) => `<i>Recurring task deleted</i>\n\n<b>${title}</b>\n\nThe recurrence was disabled and the current task was removed from active lists.`,
+      done: (title) => `<i>Task done</i>\n\n<b>${title}</b>`,
+      missed: (title) => `<i>Task missed</i>\n\n<b>${title}</b>`,
+      snoozed: (title, time) => `<i>I will remind you again</i>\n\n<b>${title}</b>\n\n<i>Time:</i> ${time}`
     },
     monthlyModes: {
       endPlusStart: "End + start of month",

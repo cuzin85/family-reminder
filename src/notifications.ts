@@ -9,6 +9,7 @@ import { formatDateTimeInTimeZone, getNextDailyReminderWithinWindow, normalizeIa
 import type { Env } from "./env";
 import { getAppLabels } from "./i18n";
 import { sendTelegramMessage } from "./telegram/client";
+import { escapeTelegramHtml } from "./telegram/html";
 import { buildAdminMainMenuKeyboard, buildMainMenuKeyboard } from "./telegram/menu";
 import { buildTaskNotificationKeyboard } from "./telegram/task-actions";
 
@@ -179,13 +180,17 @@ export async function sendDueTaskNotifications(env: Env, now: string): Promise<n
       const message = await sendTelegramMessage(
         env,
         notification.telegram_chat_id,
-        labels.telegram.notifications.reminder(notification.title, dueAt),
+        labels.telegram.notifications.reminder(
+          escapeTelegramHtml(notification.title),
+          escapeTelegramHtml(dueAt)
+        ),
         buildTaskNotificationKeyboard(
           notification.task_id,
           notification.status,
           notification.is_admin === 1,
           labels
-        )
+        ),
+        { parseMode: "HTML" }
       );
 
       await recordNotification(env, notification, "sent", now, message.message_id, null);
@@ -224,10 +229,15 @@ export async function sendDueAnnualEventNotifications(env: Env, now: string): Pr
       const message = await sendTelegramMessage(
         env,
         notification.telegram_chat_id,
-        labels.telegram.notifications.annualEvent(notification.title, eventDate, offsetDays),
+        labels.telegram.notifications.annualEvent(
+          escapeTelegramHtml(notification.title),
+          escapeTelegramHtml(eventDate),
+          offsetDays
+        ),
         notification.is_admin === 1
           ? buildAdminMainMenuKeyboard(labels)
-          : buildMainMenuKeyboard(labels)
+          : buildMainMenuKeyboard(labels),
+        { parseMode: "HTML" }
       );
 
       await recordAnnualEventNotification(env, notification, "sent", now, message.message_id, null);

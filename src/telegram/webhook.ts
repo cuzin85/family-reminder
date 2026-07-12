@@ -83,6 +83,7 @@ import {
   editTelegramMessageText,
   sendTelegramMessage
 } from "./client";
+import { escapeTelegramHtml } from "./html";
 import { ADMIN_MAIN_MENU_KEYBOARD, MAIN_MENU_KEYBOARD, buildAdminMainMenuKeyboard, buildMainMenuKeyboard } from "./menu";
 import {
   buildTaskCloseConfirmKeyboard,
@@ -370,13 +371,6 @@ function buildTaskCardKeyboard(task: TelegramTaskListItem, isAdmin: boolean, lab
   };
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
 function getReminderTimeFromTask(task: { schedule_params_json: string | null }): string | null {
   if (!task.schedule_params_json) {
     return null;
@@ -414,7 +408,7 @@ function buildTaskCardText(task: TelegramTaskListItem, timezone: string, labels:
         ? labels.telegram.taskTypes.monthly
         : labels.telegram.taskTypes.fallback;
   const lines = [
-    `<b>🎯 ${escapeHtml(task.title)}</b>`,
+    `<b>🎯 ${escapeTelegramHtml(task.title)}</b>`,
     "",
     `<i>${labels.telegram.fields.taskType}:</i> ${taskType}`,
     `<i>${labels.telegram.fields.status}:</i> ${status}`,
@@ -430,15 +424,18 @@ function buildTaskCardText(task: TelegramTaskListItem, timezone: string, labels:
   }
 
   if (task.assignee_names) {
-    lines.push(`<i>${labels.telegram.fields.assignees}:</i> ${escapeHtml(task.assignee_names)}`);
+    lines.push(`<i>${labels.telegram.fields.assignees}:</i> ${escapeTelegramHtml(task.assignee_names)}`);
   }
 
   return lines.join("\n");
 }
 
-function buildAnnualEventCardText(event: TelegramAnnualEventListItem, labels: AppLabels): string {
+function buildAnnualEventCardText(event: TelegramAnnualEventListItem, timezone: string, labels: AppLabels): string {
+  const eventTimezone = normalizeIanaTimezone(event.timezone) ?? event.timezone;
+  const userTimezone = normalizeIanaTimezone(timezone) ?? timezone;
+  const timezoneSuffix = eventTimezone !== userTimezone ? ` (${escapeTelegramHtml(eventTimezone)})` : "";
   const nextNotification = event.next_notification_at
-    ? formatDateTimeInTimeZone(event.next_notification_at, event.timezone)
+    ? formatDateTimeInTimeZone(event.next_notification_at, eventTimezone)
     : labels.annualEvents.noNextNotification;
   const occurrenceYear = Number(event.upcoming_event_date.slice(0, 4));
   const eventYearText = event.event_year && Number.isSafeInteger(occurrenceYear) && occurrenceYear >= event.event_year
@@ -447,16 +444,16 @@ function buildAnnualEventCardText(event: TelegramAnnualEventListItem, labels: Ap
       ? String(event.event_year)
       : null;
   const lines = [
-    `<b>🎂 ${escapeHtml(event.title)}</b>`,
+    `<b>🎂 ${escapeTelegramHtml(event.title)}</b>`,
     "",
     `<i>${labels.annualEvents.dateLabel}:</i> ${formatAnnualEventDisplayDate(event.upcoming_event_date)}`,
-    eventYearText ? `<i>${labels.annualEvents.eventYear}:</i> ${escapeHtml(eventYearText)}` : null,
-    `<i>${labels.annualEvents.reminderTime}:</i> ${String(event.reminder_hour).padStart(2, "0")}:${String(event.reminder_minute).padStart(2, "0")} (${escapeHtml(event.timezone)})`,
+    eventYearText ? `<i>${labels.annualEvents.eventYear}:</i> ${escapeTelegramHtml(eventYearText)}` : null,
+    `<i>${labels.annualEvents.reminderTime}:</i> ${String(event.reminder_hour).padStart(2, "0")}:${String(event.reminder_minute).padStart(2, "0")}${timezoneSuffix}`,
     `<i>${labels.annualEvents.nextNotification}:</i> ${nextNotification}`
   ].filter((line): line is string => line !== null);
 
   if (event.recipient_names) {
-    lines.push(`<i>${labels.annualEvents.recipients}:</i> ${escapeHtml(event.recipient_names)}`);
+    lines.push(`<i>${labels.annualEvents.recipients}:</i> ${escapeTelegramHtml(event.recipient_names)}`);
   }
 
   return lines.join("\n");
@@ -498,7 +495,7 @@ function buildDeleteConfirmText(title: string, isRecurring: boolean, labels: App
 }
 
 function buildConfirmationText(title: string, taskTitle: string, description: string): string {
-  return `<b>${escapeHtml(title.toUpperCase())}</b>\n\n<b>${escapeHtml(taskTitle)}</b>\n\n${escapeHtml(description)}`;
+  return `<b>${escapeTelegramHtml(title.toUpperCase())}</b>\n\n<b>${escapeTelegramHtml(taskTitle)}</b>\n\n${escapeTelegramHtml(description)}`;
 }
 
 function isRecurringTask(task: Pick<TelegramTaskListItem, "schedule_type">): boolean {
@@ -534,7 +531,10 @@ function buildTaskReminderText(task: TelegramTaskListItem, timezone: string, lab
   const timezoneSuffix = ruleTimezone && ruleTimezone !== userTimezone ? ` (${ruleTimezone})` : "";
   const dueAt = `${formatDateTimeInTimeZone(task.due_at, taskTimezone)}${timezoneSuffix}`;
 
-  return labels.telegram.notifications.reminder(task.title, dueAt);
+  return labels.telegram.notifications.reminder(
+    escapeTelegramHtml(task.title),
+    escapeTelegramHtml(dueAt)
+  );
 }
 
 function getTaskCloseSource(update: TelegramUpdate): TaskCloseSource {
@@ -1468,23 +1468,22 @@ function formatAiTaskDraft(
         ? selectedAssigneeNames.join(", ") || "-"
         : labels.telegram.aiTaskDraft.assigneeSelf;
   const missingFields = draft.missing_fields.length > 0
-    ? `\n${labels.telegram.aiTaskDraft.fields.missing}: ${formatAiMissingFields(draft.missing_fields, labels)}`
+    ? `\n<i>${escapeTelegramHtml(labels.telegram.aiTaskDraft.fields.missing)}:</i> ${escapeTelegramHtml(formatAiMissingFields(draft.missing_fields, labels))}`
     : "";
+  const taskType = draft.task_type === "one_time_window"
+    ? labels.telegram.aiTaskDraft.taskTypeOneTimeWindow
+    : labels.telegram.aiTaskDraft.taskTypeOneTime;
 
   return [
-    labels.telegram.aiTaskDraft.title,
+    `<i>${escapeTelegramHtml(labels.telegram.aiTaskDraft.title)}</i>`,
     "",
-    `${labels.telegram.aiTaskDraft.fields.title}: ${draft.title ?? "-"}`,
-    `${labels.telegram.aiTaskDraft.fields.taskType}: ${
-      draft.task_type === "one_time_window"
-        ? labels.telegram.aiTaskDraft.taskTypeOneTimeWindow
-        : labels.telegram.aiTaskDraft.taskTypeOneTime
-    }`,
-    `${labels.telegram.aiTaskDraft.fields.assignees}: ${assigneeText}`,
+    `<i>${escapeTelegramHtml(labels.telegram.aiTaskDraft.fields.title)}:</i> <b>${escapeTelegramHtml(draft.title ?? "-")}</b>`,
+    `<i>${escapeTelegramHtml(labels.telegram.aiTaskDraft.fields.taskType)}:</i> ${escapeTelegramHtml(taskType)}`,
+    `<i>${escapeTelegramHtml(labels.telegram.aiTaskDraft.fields.assignees)}:</i> ${escapeTelegramHtml(assigneeText)}`,
     draft.task_type === "one_time_window"
-      ? `${labels.telegram.aiTaskDraft.fields.window}: ${formatAiDraftDate(draft.start_date, timezone)} - ${formatAiDraftDate(draft.end_date, timezone)}`
-      : `${labels.telegram.aiTaskDraft.fields.date}: ${formatAiDraftDate(draft.date, timezone)}`,
-    `${labels.telegram.aiTaskDraft.fields.reminderTime}: ${draft.reminder_time ?? "-"}`,
+      ? `<i>${escapeTelegramHtml(labels.telegram.aiTaskDraft.fields.window)}:</i> ${escapeTelegramHtml(formatAiDraftDate(draft.start_date, timezone))} - ${escapeTelegramHtml(formatAiDraftDate(draft.end_date, timezone))}`
+      : `<i>${escapeTelegramHtml(labels.telegram.aiTaskDraft.fields.date)}:</i> ${escapeTelegramHtml(formatAiDraftDate(draft.date, timezone))}`,
+    `<i>${escapeTelegramHtml(labels.telegram.aiTaskDraft.fields.reminderTime)}:</i> ${escapeTelegramHtml(draft.reminder_time ?? "-")}`,
     missingFields
   ].filter((line) => line.length > 0).join("\n");
 }
@@ -1578,7 +1577,8 @@ async function openAiAssigneeSelection(
     now,
     messageId,
     `${draftText}\n\n${labels.telegram.aiTaskDraft.selectAssignees}`,
-    await buildAiSelectedAssigneesKeyboard(env, selectedUserIds, labels)
+    await buildAiSelectedAssigneesKeyboard(env, selectedUserIds, labels),
+    { parseMode: "HTML" }
   );
 }
 
@@ -1639,7 +1639,8 @@ async function handleAiTaskDraftText(
         ? await buildAiSelectedAssigneesKeyboard(env, sessionData.assigneeUserIds ?? [], labels)
         : nextMissingField
           ? buildAiTaskDraftCancelKeyboard(labels)
-          : buildAiTaskDraftKeyboard(labels)
+          : buildAiTaskDraftKeyboard(labels),
+      { parseMode: "HTML" }
     );
 
     return true;
@@ -1701,7 +1702,8 @@ async function handleAiTaskDraftMergeText(
         ? await buildAiSelectedAssigneesKeyboard(env, updatedData.assigneeUserIds ?? [], labels)
         : nextMissingField
           ? buildAiTaskDraftCancelKeyboard(labels)
-          : buildAiTaskDraftKeyboard(labels)
+          : buildAiTaskDraftKeyboard(labels),
+      { parseMode: "HTML" }
     );
 
     return true;
@@ -1789,7 +1791,8 @@ async function handleAiTaskDraftClarification(
         labels,
         assigneeContext
       ),
-      buildAiTaskDraftKeyboard(labels)
+      buildAiTaskDraftKeyboard(labels),
+      { parseMode: "HTML" }
     );
     return;
   }
@@ -1898,7 +1901,8 @@ async function handleAiTaskDraftClarification(
         userId,
         now,
         `${invalidMessage ?? labels.telegram.aiTaskDraft.invalidAssignee}\n\n${draftText}\n\n${labels.telegram.aiTaskDraft.selectAssignees}`,
-        await buildAiSelectedAssigneesKeyboard(env, data.assigneeUserIds ?? [], labels)
+        await buildAiSelectedAssigneesKeyboard(env, data.assigneeUserIds ?? [], labels),
+        { parseMode: "HTML" }
       );
       return;
     }
@@ -1929,7 +1933,8 @@ async function handleAiTaskDraftClarification(
     userId,
     now,
     nextField ? `${nextDraftText}\n\n${getAiClarificationPrompt(nextField, labels)}` : nextDraftText,
-    nextField ? buildAiTaskDraftCancelKeyboard(labels) : buildAiTaskDraftKeyboard(labels)
+    nextField ? buildAiTaskDraftCancelKeyboard(labels) : buildAiTaskDraftKeyboard(labels),
+    { parseMode: "HTML" }
   );
 }
 
@@ -1999,9 +2004,10 @@ async function sendTrackedCreateFlowMessage(
   userId: number,
   now: string,
   text: string,
-  replyMarkup?: InlineKeyboardMarkup
+  replyMarkup?: InlineKeyboardMarkup,
+  options?: { parseMode?: "HTML" }
 ): Promise<void> {
-  const message = await sendTelegramMessage(env, chatId, text, replyMarkup);
+  const message = await sendTelegramMessage(env, chatId, text, replyMarkup, options);
 
   await recordTelegramMessageRef(env, userId, chatId, message.message_id, "create_flow", now);
 }
@@ -2013,18 +2019,19 @@ async function editCallbackMessageOrSendTracked(
   now: string,
   messageId: number | undefined,
   text: string,
-  replyMarkup?: InlineKeyboardMarkup
+  replyMarkup?: InlineKeyboardMarkup,
+  options?: { parseMode?: "HTML" }
 ): Promise<void> {
   if (messageId) {
     try {
-      await editTelegramMessageText(env, chatId, messageId, text, replyMarkup);
+      await editTelegramMessageText(env, chatId, messageId, text, replyMarkup, options);
       return;
     } catch {
       // Telegram can reject edits for old or changed messages; fall back to a new tracked flow message.
     }
   }
 
-  await sendTrackedCreateFlowMessage(env, chatId, userId, now, text, replyMarkup);
+  await sendTrackedCreateFlowMessage(env, chatId, userId, now, text, replyMarkup, options);
 }
 
 async function editCallbackMessageOrSend(
@@ -2032,18 +2039,19 @@ async function editCallbackMessageOrSend(
   chatId: number,
   messageId: number | undefined,
   text: string,
-  replyMarkup?: InlineKeyboardMarkup
+  replyMarkup?: InlineKeyboardMarkup,
+  options?: { parseMode?: "HTML" }
 ): Promise<void> {
   if (messageId) {
     try {
-      await editTelegramMessageText(env, chatId, messageId, text, replyMarkup);
+      await editTelegramMessageText(env, chatId, messageId, text, replyMarkup, options);
       return;
     } catch {
       // Telegram can reject edits for old or changed messages; fall back to a new message.
     }
   }
 
-  await sendTelegramMessage(env, chatId, text, replyMarkup);
+  await sendTelegramMessage(env, chatId, text, replyMarkup, options);
 }
 
 async function sendTaskList(
@@ -2106,7 +2114,7 @@ async function sendTaskList(
         chatId,
         userId,
         now,
-        buildAnnualEventCardText(event, labels),
+        buildAnnualEventCardText(event, timezone, labels),
         undefined,
         { parseMode: "HTML" }
       );
@@ -2276,8 +2284,11 @@ async function handleEditTaskSession(
     await sendTelegramMessage(
       env,
       chatId,
-      result.status === "updated" ? labels.telegram.editPrompts.titleChanged(title) : labels.telegram.notices.notFoundOrClosed,
-      getMainMenuKeyboard(isAdmin, labels)
+      result.status === "updated"
+        ? labels.telegram.editPrompts.titleChanged(escapeTelegramHtml(title))
+        : labels.telegram.notices.notFoundOrClosed,
+      getMainMenuKeyboard(isAdmin, labels),
+      result.status === "updated" ? { parseMode: "HTML" } : undefined
     );
     return;
   }
@@ -2805,12 +2816,13 @@ async function handleCreateTaskSession(
       env,
       chatId,
       labels.telegram.createPrompts.createdOneTime(
-        title,
-        getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels),
-        data.dueDateDisplay,
-        time.display
+        escapeTelegramHtml(title),
+        escapeTelegramHtml(getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels)),
+        escapeTelegramHtml(data.dueDateDisplay),
+        escapeTelegramHtml(time.display)
       ),
-      getMainMenuKeyboard(isAdmin, labels)
+      getMainMenuKeyboard(isAdmin, labels),
+      { parseMode: "HTML" }
     );
     return;
   }
@@ -3036,12 +3048,13 @@ async function handleCreateTaskSession(
         env,
         chatId,
         labels.telegram.createPrompts.createdOneTimeWindow(
-          title,
-          getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels),
-          data.windowDisplay,
-          time.display
+          escapeTelegramHtml(title),
+          escapeTelegramHtml(getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels)),
+          escapeTelegramHtml(data.windowDisplay),
+          escapeTelegramHtml(time.display)
         ),
-        getMainMenuKeyboard(isAdmin, labels)
+        getMainMenuKeyboard(isAdmin, labels),
+        { parseMode: "HTML" }
       );
       return;
     }
@@ -3087,13 +3100,14 @@ async function handleCreateTaskSession(
         env,
         chatId,
         labels.telegram.createPrompts.createdWeekly(
-          title,
-          getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels),
-          getLocalizedWeekdayName(weekday, labels),
-          time.display,
-          window.dueDisplay
+          escapeTelegramHtml(title),
+          escapeTelegramHtml(getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels)),
+          escapeTelegramHtml(getLocalizedWeekdayName(weekday, labels)),
+          escapeTelegramHtml(time.display),
+          escapeTelegramHtml(window.dueDisplay)
         ),
-        getMainMenuKeyboard(isAdmin, labels)
+        getMainMenuKeyboard(isAdmin, labels),
+        { parseMode: "HTML" }
       );
       return;
     }
@@ -3131,12 +3145,13 @@ async function handleCreateTaskSession(
         env,
         chatId,
         labels.telegram.createPrompts.createdMonthly(
-          title,
-          getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels),
-          data.startDay === data.endDay ? String(data.startDay) : `${data.startDay}-${data.endDay}`,
-          time.display
+          escapeTelegramHtml(title),
+          escapeTelegramHtml(getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels)),
+          escapeTelegramHtml(data.startDay === data.endDay ? String(data.startDay) : `${data.startDay}-${data.endDay}`),
+          escapeTelegramHtml(time.display)
         ),
-        getMainMenuKeyboard(isAdmin, labels)
+        getMainMenuKeyboard(isAdmin, labels),
+        { parseMode: "HTML" }
       );
       return;
     }
@@ -3174,12 +3189,13 @@ async function handleCreateTaskSession(
         env,
         chatId,
         labels.telegram.createPrompts.createdMonthly(
-          title,
-          getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels),
-          data.firstDays === 0 ? `${data.lastDays}+0` : `${data.lastDays}+${data.firstDays}`,
-          time.display
+          escapeTelegramHtml(title),
+          escapeTelegramHtml(getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels)),
+          escapeTelegramHtml(data.firstDays === 0 ? `${data.lastDays}+0` : `${data.lastDays}+${data.firstDays}`),
+          escapeTelegramHtml(time.display)
         ),
-        getMainMenuKeyboard(isAdmin, labels)
+        getMainMenuKeyboard(isAdmin, labels),
+        { parseMode: "HTML" }
       );
       return;
     }
@@ -4113,8 +4129,9 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
           storedUser.id,
           now,
           update.callback_query?.message?.message_id,
-          labels.telegram.editPrompts.chooseFieldFor(task.title),
-          buildEditFieldKeyboard(taskId, task.schedule_type, labels)
+          labels.telegram.editPrompts.chooseFieldFor(escapeTelegramHtml(task.title)),
+          buildEditFieldKeyboard(taskId, task.schedule_type, labels),
+          { parseMode: "HTML" }
         );
       }
     }
@@ -4150,8 +4167,9 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
           env,
           context.chat.id,
           update.callback_query?.message?.message_id,
-          labels.telegram.results.done(resultTitle),
-          getMainMenuKeyboard(storedUser.is_admin === 1, labels)
+          labels.telegram.results.done(escapeTelegramHtml(resultTitle)),
+          getMainMenuKeyboard(storedUser.is_admin === 1, labels),
+          { parseMode: "HTML" }
         );
       }
     } else {
@@ -4177,8 +4195,9 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
           env,
           context.chat.id,
           update.callback_query?.message?.message_id,
-          labels.telegram.results.missed(resultTitle),
-          getMainMenuKeyboard(storedUser.is_admin === 1, labels)
+          labels.telegram.results.missed(escapeTelegramHtml(resultTitle)),
+          getMainMenuKeyboard(storedUser.is_admin === 1, labels),
+          { parseMode: "HTML" }
         );
       }
     }
@@ -4210,7 +4229,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
               labels
             )
           : buildTaskCardKeyboard(task, storedUser.is_admin === 1, labels);
-        const options = isNotification ? undefined : { parseMode: "HTML" as const };
+        const options = { parseMode: "HTML" as const };
 
         if (callbackMessageId) {
           try {
@@ -4292,8 +4311,9 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
           env,
           context.chat.id,
           update.callback_query?.message?.message_id,
-          labels.telegram.results.cancelled(resultTitle),
-          getMainMenuKeyboard(storedUser.is_admin === 1, labels)
+          labels.telegram.results.cancelled(escapeTelegramHtml(resultTitle)),
+          getMainMenuKeyboard(storedUser.is_admin === 1, labels),
+          { parseMode: "HTML" }
         );
       }
     }
@@ -4366,8 +4386,8 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
           now
         });
         const resultText = result.status === "deleted_rule"
-          ? labels.telegram.results.deletedRule(resultTitle)
-          : labels.telegram.results.deletedInstance(resultTitle);
+          ? labels.telegram.results.deletedRule(escapeTelegramHtml(resultTitle))
+          : labels.telegram.results.deletedInstance(escapeTelegramHtml(resultTitle));
 
         await answerCallbackQuery(env, update.callback_query?.id ?? "", labels.telegram.notices.deleted);
         const callbackMessageId = update.callback_query?.message?.message_id;
@@ -4375,12 +4395,12 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
 
         if (callbackMessageId) {
           try {
-            await editTelegramMessageText(env, context.chat.id, callbackMessageId, resultText, mainMenuKeyboard);
+            await editTelegramMessageText(env, context.chat.id, callbackMessageId, resultText, mainMenuKeyboard, { parseMode: "HTML" });
           } catch {
-            await sendTelegramMessage(env, context.chat.id, resultText, mainMenuKeyboard);
+            await sendTelegramMessage(env, context.chat.id, resultText, mainMenuKeyboard, { parseMode: "HTML" });
           }
         } else {
-          await sendTelegramMessage(env, context.chat.id, resultText, mainMenuKeyboard);
+          await sendTelegramMessage(env, context.chat.id, resultText, mainMenuKeyboard, { parseMode: "HTML" });
         }
       }
     }
@@ -4452,8 +4472,12 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
         await sendTelegramMessage(
           env,
           context.chat.id,
-          labels.telegram.results.snoozed(resultTitle, nextRemindAt),
-          getMainMenuKeyboard(storedUser.is_admin === 1, labels)
+          labels.telegram.results.snoozed(
+            escapeTelegramHtml(resultTitle),
+            escapeTelegramHtml(nextRemindAt)
+          ),
+          getMainMenuKeyboard(storedUser.is_admin === 1, labels),
+          { parseMode: "HTML" }
         );
       }
     }
@@ -4813,7 +4837,8 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
         now,
         update.callback_query?.message?.message_id,
         `${draftText}\n\n${labels.telegram.aiTaskDraft.selectAssignees}`,
-        await buildAiSelectedAssigneesKeyboard(env, selectedUserIds, labels)
+        await buildAiSelectedAssigneesKeyboard(env, selectedUserIds, labels),
+        { parseMode: "HTML" }
       );
     }
   } else if (callbackData === "ai:create:assignees:done") {
@@ -4860,7 +4885,8 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
           now,
           update.callback_query?.message?.message_id,
           nextField ? `${draftText}\n\n${getAiClarificationPrompt(nextField, labels)}` : draftText,
-          nextField ? buildAiTaskDraftCancelKeyboard(labels) : buildAiTaskDraftKeyboard(labels)
+          nextField ? buildAiTaskDraftCancelKeyboard(labels) : buildAiTaskDraftKeyboard(labels),
+          { parseMode: "HTML" }
         );
       }
     }
@@ -4932,18 +4958,19 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
             context.chat.id,
             taskType === "one_time_window" && availableFrom
               ? labels.telegram.createPrompts.createdOneTimeWindow(
-                title,
-                getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels),
-                `${formatDateInTimeZone(availableFrom.iso, storedUser.timezone)} - ${formatDateInTimeZone(dueAt.iso, storedUser.timezone)}`,
-                reminderTime.display
+                escapeTelegramHtml(title),
+                escapeTelegramHtml(getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels)),
+                escapeTelegramHtml(`${formatDateInTimeZone(availableFrom.iso, storedUser.timezone)} - ${formatDateInTimeZone(dueAt.iso, storedUser.timezone)}`),
+                escapeTelegramHtml(reminderTime.display)
               )
               : labels.telegram.createPrompts.createdOneTime(
-                title,
-                getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels),
-                formatDateInTimeZone(dueAt.iso, storedUser.timezone),
-                reminderTime.display
+                escapeTelegramHtml(title),
+                escapeTelegramHtml(getAssigneeSummary(data.assigneeMode, assigneeUserIds.length, labels)),
+                escapeTelegramHtml(formatDateInTimeZone(dueAt.iso, storedUser.timezone)),
+                escapeTelegramHtml(reminderTime.display)
               ),
-            getMainMenuKeyboard(storedUser.is_admin === 1, labels)
+            getMainMenuKeyboard(storedUser.is_admin === 1, labels),
+            { parseMode: "HTML" }
           );
         }
       }
